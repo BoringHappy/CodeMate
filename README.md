@@ -365,7 +365,7 @@ CodeMate automatically monitors PR comments and notifies Claude when new feedbac
 Each cron run checks the following in priority order (only one action is taken per run):
 
 1. **CI failures** — if a CI check fails on the current branch, Claude is sent the failure logs and asked to fix them
-2. **PR ready for review** — when a draft PR is marked ready for review, Claude is asked to update the PR title and description via `/pr:update` and add a `pr-updated` label
+2. **PR ready for review** — when a draft PR is marked ready for review, Claude is asked to update the PR title and description via `/pr:update` (which also applies the `pr-updated` label so the PR isn't re-notified)
 3. **Issue comments** — new general PR comments (Conversation tab) without a 👀 reaction are forwarded to Claude
 4. **Review comments** — unresolved inline code comments (Files changed tab) trigger `/pr:fix-comments`
 

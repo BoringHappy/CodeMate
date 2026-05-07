@@ -84,6 +84,16 @@ gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number) -X PATCH 
 gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number) -X PATCH -f title="Your improved title here" -f body='Your improved summary here'
 ```
 
+### Adding the `pr-updated` label
+
+After successfully updating the PR, add the `pr-updated` label so monitors and reviewers can see the PR description has been refreshed:
+
+```bash
+gh api repos/:owner/:repo/issues/$(gh pr view --json number -q .number)/labels --input - <<< '["pr-updated"]'
+```
+
+This step runs in both `--summary-only` and default modes.
+
 ## Prerequisites
 
 - Must be run in a git repository with an active pull request
