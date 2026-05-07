@@ -234,7 +234,7 @@ check_pr_ready_for_review() {
     # PR is ready for review and doesn't have the label
     echo "$(date): PR is ready for review, notifying Claude"
     if session_exists "$CLAUDE_SESSION"; then
-        send_and_verify_command "$CLAUDE_SESSION" "The PR is now ready for review. Please use /pr:update skill to update the PR title and description based on all changes made. After updating, add the 'pr-updated' label to the GitHub PR using: gh api repos/:owner/:repo/issues/$pr_number/labels --input - <<< '[\"pr-updated\"]'" 3
+        send_and_verify_command "$CLAUDE_SESSION" "The PR is now ready for review. Please use /pr:update skill to update the PR title and description based on all changes made." 3
         READY_FOR_REVIEW_NOTIFIED="true"
         return 1  # Signal that we sent a notification
     fi
