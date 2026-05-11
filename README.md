@@ -105,6 +105,9 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
 
 # For Chinese users: Use DaoCloud mirror for faster image pulls
 codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:latest
+
+# Pass arbitrary Docker run parameters (e.g. enable GPU access)
+codemate --branch feature/xyz --docker-param "--gpus all"
 ```
 
 The setup command will:
@@ -213,6 +216,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `DEFAULT_PLUGINS` | No | Comma-separated default plugins (default: `git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`) |
 | `CUSTOM_MARKETPLACES` | No | Comma-separated list of custom plugin marketplace repositories (e.g., `username/repo1,org/repo2`) |
 | `CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
+| `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
 
 ## How It Works
