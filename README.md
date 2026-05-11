@@ -105,6 +105,9 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
 
 # For Chinese users: Use DaoCloud mirror for faster image pulls
 codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:latest
+
+# Pass arbitrary Docker run parameters (e.g. enable GPU access)
+codemate --branch feature/xyz --docker-param "--gpus all"
 ```
 
 The setup command will:

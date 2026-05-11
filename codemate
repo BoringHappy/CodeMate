@@ -531,9 +531,10 @@ Examples:
   # Run with initial query
   codemate --branch feature/xyz --query "Please review the code and fix any issues"
 
-  # Pass arbitrary Docker run parameters (network, memory, etc.)
+  # Pass arbitrary Docker run parameters (network, memory, GPU, etc.)
   codemate --branch feature/xyz --docker-param "--network container:my-proxy"
   codemate --branch feature/xyz --docker-param "--network bridge" --docker-param "--memory 2g"
+  codemate --branch feature/xyz --docker-param "--gpus all"
 
 EOF
 }
