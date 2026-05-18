@@ -19,6 +19,12 @@ codemate --branch YOUR_BRANCH \
   --mount /var/run/docker.sock:/var/run/docker.sock
 ```
 
+Or set it once in `.env` so every run picks it up:
+
+```bash
+CODEMATE_MOUNTS="/var/run/docker.sock:/var/run/docker.sock"
+```
+
 **Permission on the socket.** The host socket is typically owned by `root:docker` with mode `0660`. Inside the container, the `agent` user (uid 1000) needs to be in a group whose GID matches the host's docker group. Two options:
 
 1. Add `agent` to the host docker group at container start by adding `--group-add $(stat -c %g /var/run/docker.sock)` to the underlying `docker run` flags (this is a launcher-side change).

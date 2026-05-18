@@ -19,6 +19,12 @@ codemate --branch YOUR_BRANCH \
   --mount ~/.kube:/home/agent/.kube
 ```
 
+Or set it once in `.env` so every run picks it up:
+
+```bash
+CODEMATE_MOUNTS="$HOME/.kube:/home/agent/.kube"
+```
+
 If the kubeconfig references TLS client certs or token files outside `~/.kube`, mount those paths too (or use `--mount` per file).
 
 **Alternative: a single file with `KUBECONFIG`.** Mount one config file and point the env var at it:

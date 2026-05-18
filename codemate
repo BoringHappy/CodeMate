@@ -369,6 +369,12 @@ run_codemate() {
         docker_run_extra+=("${_env_params[@]}")
     fi
 
+    # Extend custom_mounts with CODEMATE_MOUNTS env var (space-separated PATH:PATH specs)
+    if [ -n "${CODEMATE_MOUNTS:-}" ]; then
+        read -ra _env_mounts <<< "$CODEMATE_MOUNTS"
+        custom_mounts+=("${_env_mounts[@]}")
+    fi
+
     # Apply --network host on Linux unless user already specified --network
     local network_args=()
     local _has_network=false
@@ -489,6 +495,7 @@ Environment Variables:
   GIT_USER_EMAIL       Git commit author email
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
   DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
+  CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "/var/run/docker.sock:/var/run/docker.sock $HOME/.kube:/home/agent/.kube")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops
 
 Examples:
@@ -518,6 +525,9 @@ Examples:
   # Run with custom volume mounts
   codemate --branch feature/xyz --mount /local/path:/container/path
   codemate --branch feature/xyz --mount ~/data:/data --mount ~/config:/config
+
+  # Set default mounts in .env so every run picks them up
+  # echo 'CODEMATE_MOUNTS="/var/run/docker.sock:/var/run/docker.sock $HOME/.kube:/home/agent/.kube"' >> .env
 
   # Run with custom image
   codemate --branch feature/xyz --image ghcr.io/boringhappy/codemate:v1.0.0
