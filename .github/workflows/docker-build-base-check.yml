@@ -56,14 +56,6 @@ jobs:
         run: |
           set -euxo pipefail
           docker run --rm codemate-base:pr-check bash -euxc '
-            buildah --version
-            skopeo --version
-            fuse-overlayfs --version
-            command -v newuidmap
             kubectl version --client --output=yaml
             helm version --short
-            test -s /etc/containers/storage.conf
-            grep -q "fuse-overlayfs" /etc/containers/storage.conf
-            grep -q "^agent:" /etc/subuid
-            grep -q "^agent:" /etc/subgid
           '

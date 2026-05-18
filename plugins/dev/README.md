@@ -16,15 +16,18 @@ List environment variable keys without exposing their values.
 **Security:**
 This skill only reads environment variable names (keys), never their values. This prevents accidental exposure of sensitive information.
 
-### `/dev:build-image`
+### `/dev:run-image`
 
-Build and push OCI/Docker images rootlessly using `buildah` and `skopeo` — no Docker daemon, no `/var/run/docker.sock` mount, no `--privileged` flag.
+Run an existing container image inside a live Kubernetes cluster: launch a pod from the image, inject local files from the CodeMate workspace, and exec commands — all without a local Docker daemon or build toolchain.
 
 **Usage:**
-- Build images from a `Dockerfile`
-- Multi-arch builds (`linux/amd64`, `linux/arm64`) via `buildah --manifest`
-- Push to registries with `buildah push`
-- Copy or inspect images between registries with `skopeo`
+- Launch an arbitrary image as a pod with `kubectl run --restart=Never --command -- sleep infinity`
+- Inject local files via `kubectl cp` (when the image has `tar`) or `kubectl run --stdin` (when it doesn't)
+- Exec the real workload inside the pod with `kubectl exec`
+
+**Runtime requirements:**
+- Kubeconfig must be available inside the container (see `/dev:manage-k8s` for the mount setup — the same kubeconfig is reused).
+- The target image must already exist in a registry the cluster can pull from.
 
 ### `/dev:manage-k8s`
 
@@ -47,8 +50,8 @@ This plugin is designed to be installed via the CodeMate plugin marketplace.
 /dev:read-env-key
 /dev:read-env-key GIT
 
-# Build and push a container image
-/dev:build-image
+# Run an existing image as a k8s pod with local files
+/dev:run-image
 
 # Manage Kubernetes resources
 /dev:manage-k8s
