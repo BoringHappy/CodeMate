@@ -43,11 +43,10 @@ buildah build \
 
 ## Push to a registry
 
-Authenticate first (writes to `~/.config/containers/auth.json`):
+Authenticate first (writes to `~/.config/containers/auth.json`). Prefer
+`--password-stdin` so the token never lands in shell history:
 
 ```bash
-buildah login -u USERNAME ghcr.io        # prompts for password
-# or non-interactive:
 echo "$GH_TOKEN" | buildah login -u USERNAME --password-stdin ghcr.io
 ```
 
@@ -68,7 +67,7 @@ buildah manifest push --all myimage:tag docker://ghcr.io/org/myimage:tag
 Copy between registries without pulling locally:
 
 ```bash
-skopeo copy docker://src.io/img:tag docker://dst.io/img:tag
+skopeo copy docker://registry.example.com/img:tag docker://dst.io/img:tag
 ```
 
 Inspect remotely:

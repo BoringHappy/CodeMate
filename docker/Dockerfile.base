@@ -84,6 +84,19 @@ RUN set -euxo pipefail \
     && chmod +x /usr/local/bin/kubectl \
     && curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+# Configure rootless container storage to use overlay + fuse-overlayfs.
+# Without this, buildah may default to vfs (slow, no layer dedup) or fail
+# attempting to use the kernel overlay driver without privileges.
+RUN set -euxo pipefail \
+    && mkdir -p /etc/containers \
+    && printf '%s\n' \
+        '[storage]' \
+        'driver = "overlay"' \
+        '' \
+        '[storage.options.overlay]' \
+        'mount_program = "/usr/bin/fuse-overlayfs"' \
+        > /etc/containers/storage.conf
+
 # Install AWS CLI v2 (multi-arch: amd64/arm64)
 RUN set -euxo pipefail \
     && ARCH=$(dpkg --print-architecture) \

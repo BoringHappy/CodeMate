@@ -64,6 +64,13 @@ kubectl logs --previous POD -n NAMESPACE      # crashed container
 kubectl exec -it POD -n NAMESPACE -- /bin/sh
 ```
 
+Distroless or minimal images often lack `sh`/`bash`. Fallbacks:
+
+```bash
+kubectl exec -it POD -n NAMESPACE -- /bin/bash
+kubectl debug -it POD -n NAMESPACE --image=busybox --target=CONTAINER
+```
+
 ### Apply / diff / delete
 
 ```bash
@@ -101,7 +108,14 @@ helm upgrade --install RELEASE chart/path -n NAMESPACE -f values.yaml
 
 ```bash
 helm template RELEASE chart/path -f values.yaml > rendered.yaml
-helm diff upgrade RELEASE chart/path -f values.yaml   # requires helm-diff plugin
+```
+
+For richer diffs, install the `helm-diff` plugin first (not bundled in the
+base image):
+
+```bash
+helm plugin install https://github.com/databus23/helm-diff
+helm diff upgrade RELEASE chart/path -f values.yaml
 ```
 
 ### List / inspect / rollback
