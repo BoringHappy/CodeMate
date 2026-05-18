@@ -1,7 +1,7 @@
 {
   "name": "dev",
   "description": "Development utilities including environment variable key management, rootless container image builds, and Kubernetes management",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": {
     "name": "CodeMate"
   }

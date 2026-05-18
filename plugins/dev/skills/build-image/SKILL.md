@@ -67,7 +67,7 @@ buildah manifest push --all myimage:tag docker://ghcr.io/org/myimage:tag
 Copy between registries without pulling locally:
 
 ```bash
-skopeo copy docker://registry.example.com/img:tag docker://dst.io/img:tag
+skopeo copy docker://src.example.com/img:tag docker://dst.example.com/img:tag
 ```
 
 Inspect remotely:
