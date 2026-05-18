@@ -8,7 +8,34 @@ context: fork
 
 Inspect, deploy, and manage Kubernetes resources with `kubectl` and `helm`. Both are pre-installed in the base image (latest stable, multi-arch).
 
-## Tooling check
+## Prepare
+
+CodeMate does **not** mount a kubeconfig by default. Before this skill can talk to any cluster, the user must launch the container with their kubeconfig mounted in.
+
+**Launch CodeMate with the kubeconfig mounted:**
+
+```bash
+codemate --branch YOUR_BRANCH \
+  --mount ~/.kube:/home/agent/.kube
+```
+
+If the kubeconfig references TLS client certs or token files outside `~/.kube`, mount those paths too (or use `--mount` per file).
+
+**Alternative: a single file with `KUBECONFIG`.** Mount one config file and point the env var at it:
+
+```bash
+codemate --branch YOUR_BRANCH \
+  --mount /path/to/kubeconfig:/home/agent/.kube/config
+```
+
+**Verify cluster access before doing anything destructive:**
+
+```bash
+kubectl config current-context
+kubectl cluster-info
+```
+
+If `kubectl` reports `Unable to connect to the server` or `error loading config file`, stop and tell the user what's missing — do not try to work around it.
 
 !```bash
 if command -v kubectl >/dev/null 2>&1; then
@@ -135,6 +162,5 @@ helm uninstall RELEASE -n NAMESPACE
 
 ## Notes
 
-- Cluster access requires a kubeconfig — mount `~/.kube/config` into the container or use a service-account token.
 - Prefer `kubectl diff`, `helm template`, or `helm diff` before applying changes to production clusters.
 - Both binaries are multi-arch (amd64/arm64).

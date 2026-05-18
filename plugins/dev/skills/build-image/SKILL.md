@@ -8,10 +8,30 @@ context: fork
 
 Build and push images using the official Docker CLI (`docker` + `docker buildx`). The CLI is installed in the base image; the daemon is the host's, reached through a mounted `/var/run/docker.sock`.
 
-## Runtime requirements
+## Prepare
 
-- The CodeMate container must be launched with `-v /var/run/docker.sock:/var/run/docker.sock`.
-- The `agent` user needs permission to read/write that socket. The launcher should pass `--group-add $(stat -c %g /var/run/docker.sock)` so `agent`'s supplementary groups include the host docker group; otherwise `sudo docker ...` works as a fallback.
+CodeMate does **not** mount the Docker socket by default. Before this skill can do anything, the user must launch the container with the host's `/var/run/docker.sock` mounted in.
+
+**Launch CodeMate with the socket mounted:**
+
+```bash
+codemate --branch YOUR_BRANCH \
+  --mount /var/run/docker.sock:/var/run/docker.sock
+```
+
+**Permission on the socket.** The host socket is typically owned by `root:docker` with mode `0660`. Inside the container, the `agent` user (uid 1000) needs to be in a group whose GID matches the host's docker group. Two options:
+
+1. Add `agent` to the host docker group at container start by adding `--group-add $(stat -c %g /var/run/docker.sock)` to the underlying `docker run` flags (this is a launcher-side change).
+2. Fall back to `sudo docker …` from inside the container — `agent` has passwordless sudo.
+
+**Verify the socket is reachable before building:**
+
+```bash
+docker info >/dev/null 2>&1 && echo "✓ daemon reachable" \
+  || echo "✗ daemon not reachable — check socket mount and permissions"
+```
+
+If verification fails, stop and tell the user what's missing — do not try to work around it.
 
 ## Tooling check
 
