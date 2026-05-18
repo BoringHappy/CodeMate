@@ -13,18 +13,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-24.04
-            arch: amd64
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
+    name: Build (amd64)
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -40,12 +30,12 @@ jobs:
         with:
           context: ./docker
           file: ./docker/Dockerfile.base
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: false
           load: true
           tags: codemate-base:pr-check
-          cache-from: type=gha,scope=base-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=base-check-${{ matrix.arch }}
+          cache-from: type=gha,scope=base-amd64
+          cache-to: type=gha,mode=max,scope=base-check-amd64
           provenance: false
 
       - name: Smoke test — required tools present and runnable
