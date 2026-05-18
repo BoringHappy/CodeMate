@@ -12,23 +12,24 @@ Build and push images using the official Docker CLI (`docker` + `docker buildx`)
 
 CodeMate does **not** mount the Docker socket by default. Before this skill can do anything, the user must launch the container with the host's `/var/run/docker.sock` mounted in.
 
-**Launch CodeMate with the socket mounted:**
+> ⚠️ **Security:** Mounting `/var/run/docker.sock` gives container processes root-equivalent control over the host's Docker daemon — a process inside can `docker run --privileged -v /:/host …` to escape. Only mount the socket on trusted hosts you already control.
+
+**Launch CodeMate with the socket mounted and the docker group passed through:**
 
 ```bash
 codemate --branch YOUR_BRANCH \
-  --mount /var/run/docker.sock:/var/run/docker.sock
+  --mount /var/run/docker.sock:/var/run/docker.sock \
+  --docker-param "--group-add $(stat -c %g /var/run/docker.sock)"
 ```
 
-Or set it once in `.env` so every run picks it up:
+Or set both once in `.env` so every run picks them up:
 
 ```bash
 CODEMATE_MOUNTS="/var/run/docker.sock:/var/run/docker.sock"
+DOCKER_PARAMS="--group-add 999"   # replace 999 with `stat -c %g /var/run/docker.sock` from the host
 ```
 
-**Permission on the socket.** The host socket is typically owned by `root:docker` with mode `0660`. Inside the container, the `agent` user (uid 1000) needs to be in a group whose GID matches the host's docker group. Two options:
-
-1. Add `agent` to the host docker group at container start by adding `--group-add $(stat -c %g /var/run/docker.sock)` to the underlying `docker run` flags (this is a launcher-side change).
-2. Fall back to `sudo docker …` from inside the container — `agent` has passwordless sudo.
+**Why `--group-add`?** The host socket is typically owned by `root:docker` with mode `0660`. The `agent` user (uid 1000) inside the container needs a supplementary group whose GID matches the host's docker group. If you skip this, fall back to `sudo docker …` — `agent` has passwordless sudo.
 
 **Verify the socket is reachable before building:**
 

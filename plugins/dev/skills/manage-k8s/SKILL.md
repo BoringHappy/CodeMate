@@ -43,6 +43,8 @@ kubectl cluster-info
 
 If `kubectl` reports `Unable to connect to the server` or `error loading config file`, stop and tell the user what's missing — do not try to work around it.
 
+## Tooling check
+
 !```bash
 if command -v kubectl >/dev/null 2>&1; then
   kubectl version --client --output=yaml 2>/dev/null | head -5

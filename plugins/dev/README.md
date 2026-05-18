@@ -27,8 +27,14 @@ Build and push Docker/OCI images using the official Docker CLI talking to the ho
 - Inspect remote images with `docker buildx imagetools inspect`
 
 **Runtime requirements:**
-- CodeMate must be launched with `-v /var/run/docker.sock:/var/run/docker.sock`.
-- `agent` needs access to the socket — pass `--group-add $(stat -c %g /var/run/docker.sock)` to the container, or use `sudo docker ...` as a fallback.
+- Launch CodeMate with the Docker socket mounted and the host's docker group passed through:
+  ```bash
+  codemate --branch YOUR_BRANCH \
+    --mount /var/run/docker.sock:/var/run/docker.sock \
+    --docker-param "--group-add $(stat -c %g /var/run/docker.sock)"
+  ```
+  Or set `CODEMATE_MOUNTS` + `DOCKER_PARAMS` in `.env` for the same effect on every run. Fall back to `sudo docker ...` if you skip `--group-add`.
+- **Security:** Mounting `/var/run/docker.sock` grants root-equivalent control of the host daemon to anything running inside CodeMate. Only use this on trusted hosts.
 
 ### `/dev:manage-k8s`
 
