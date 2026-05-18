@@ -18,13 +18,17 @@ This skill only reads environment variable names (keys), never their values. Thi
 
 ### `/dev:build-image`
 
-Build and push OCI/Docker images rootlessly using `buildah` and `skopeo` — no Docker daemon, no `/var/run/docker.sock` mount, no `--privileged` flag.
+Build and push Docker/OCI images using the official Docker CLI talking to the host's daemon via a mounted `/var/run/docker.sock`.
 
 **Usage:**
-- Build images from a `Dockerfile`
-- Multi-arch builds (`linux/amd64`, `linux/arm64`) via `buildah --manifest`
-- Push to registries with `buildah push`
-- Copy or inspect images between registries with `skopeo`
+- Build images from a `Dockerfile` with `docker build`
+- Multi-arch builds (`linux/amd64`, `linux/arm64`) with `docker buildx build --platform ... --push`
+- Push to registries with `docker push`
+- Inspect remote images with `docker buildx imagetools inspect`
+
+**Runtime requirements:**
+- CodeMate must be launched with `-v /var/run/docker.sock:/var/run/docker.sock`.
+- `agent` needs access to the socket — pass `--group-add $(stat -c %g /var/run/docker.sock)` to the container, or use `sudo docker ...` as a fallback.
 
 ### `/dev:manage-k8s`
 

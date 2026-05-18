@@ -1,90 +1,105 @@
 ---
 name: build-image
-description: Build and push OCI/Docker images rootlessly with buildah and skopeo, no Docker daemon required. Use when the user wants to build a container image inside CodeMate, push to a registry, or copy images between registries without needing /var/run/docker.sock or --privileged.
+description: Build and push Docker/OCI images via the Docker CLI talking to the host daemon over a mounted /var/run/docker.sock. Use when the user wants to build a container image inside CodeMate or push it to a registry.
 context: fork
 ---
 
-# Build Container Image (Rootless)
+# Build Container Image (Docker CLI)
 
-Build and push OCI/Docker images using `buildah` and `skopeo`. Both tools are daemonless, work rootlessly, and require no host Docker socket or `--privileged` flag.
+Build and push images using the official Docker CLI (`docker` + `docker buildx`). The CLI is installed in the base image; the daemon is the host's, reached through a mounted `/var/run/docker.sock`.
+
+## Runtime requirements
+
+- The CodeMate container must be launched with `-v /var/run/docker.sock:/var/run/docker.sock`.
+- The `agent` user needs permission to read/write that socket. The launcher should pass `--group-add $(stat -c %g /var/run/docker.sock)` so `agent`'s supplementary groups include the host docker group; otherwise `sudo docker ...` works as a fallback.
 
 ## Tooling check
 
 !```bash
-for bin in buildah skopeo fuse-overlayfs newuidmap; do
+for bin in docker; do
   if command -v "$bin" >/dev/null 2>&1; then
-    echo "✓ $bin"
+    echo "✓ $bin ($("$bin" --version 2>/dev/null | head -1))"
   else
     echo "✗ $bin (missing)"
   fi
 done
+if docker buildx version >/dev/null 2>&1; then
+  echo "✓ docker buildx ($(docker buildx version | head -1))"
+else
+  echo "✗ docker buildx (missing)"
+fi
+if docker info >/dev/null 2>&1; then
+  echo "✓ daemon reachable"
+else
+  echo "✗ daemon not reachable (is /var/run/docker.sock mounted and readable?)"
+fi
 ```
 
 ## Build from a Dockerfile
 
 ```bash
-buildah build -t myimage:tag -f Dockerfile .
+docker build -t myimage:tag -f Dockerfile .
 ```
 
 - `-t` sets the image tag.
 - `-f` is the Dockerfile (defaults to `./Dockerfile`).
 - The last argument is the build context.
 
-## Multi-arch build
+## Multi-arch build with buildx
 
 ```bash
-buildah build \
+docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --manifest myimage:tag \
+  -t registry.example.com/org/myimage:tag \
+  --push \
   .
 ```
 
-`--manifest` produces a manifest list referencing per-arch images.
+`--push` is required for multi-arch builds because the local image store can only hold a single platform. The host daemon must have QEMU set up (`docker run --privileged --rm tonistiigi/binfmt --install all`, once per host) for cross-platform builds.
 
 ## Push to a registry
 
-Authenticate first (writes to `~/.config/containers/auth.json`). Prefer
-`--password-stdin` so the token never lands in shell history:
+Authenticate first (writes to `~/.docker/config.json`). Prefer `--password-stdin` so the token never lands in shell history:
 
 ```bash
-echo "$GH_TOKEN" | buildah login -u USERNAME --password-stdin ghcr.io
+echo "$GH_TOKEN" | docker login -u USERNAME --password-stdin ghcr.io
 ```
 
 Push a single image:
 
 ```bash
-buildah push myimage:tag docker://ghcr.io/org/myimage:tag
+docker push ghcr.io/org/myimage:tag
 ```
 
-Push a multi-arch manifest:
+## Tag for a different registry
 
 ```bash
-buildah manifest push --all myimage:tag docker://ghcr.io/org/myimage:tag
+docker tag myimage:tag registry.datalake.vip/org/myimage:tag
+docker push registry.datalake.vip/org/myimage:tag
 ```
 
-## Copy or inspect images with skopeo
+## Inspect images
 
-Copy between registries without pulling locally:
+Local:
 
 ```bash
-skopeo copy docker://src.example.com/img:tag docker://dst.example.com/img:tag
+docker image inspect myimage:tag
 ```
 
-Inspect remotely:
+Remote (without pulling the full image):
 
 ```bash
-skopeo inspect docker://ghcr.io/org/myimage:tag
+docker buildx imagetools inspect registry.example.com/org/myimage:tag
 ```
 
 ## List local images
 
 ```bash
-buildah images
+docker images
 ```
 
 ## Notes
 
-- No Docker daemon and no `--privileged` flag is required.
-- Rootless user namespaces are backed by `/etc/subuid` and `/etc/subgid` entries for the `agent` user (configured in the base image).
-- Storage uses `fuse-overlayfs` for performant rootless overlays.
-- `buildah build` accepts standard Dockerfile syntax.
+- The container does not run its own dockerd. All builds, pushes, and image storage live on the host daemon reached through the mounted socket.
+- Build context is streamed from the CLI to the daemon, so paths in the build command are resolved against the container's filesystem.
+- For private registries with self-signed certs, configure the host daemon's `/etc/docker/daemon.json` with `insecure-registries` — that is a host-side change, not something to do from inside CodeMate.
