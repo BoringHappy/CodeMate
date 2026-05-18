@@ -16,25 +16,18 @@ List environment variable keys without exposing their values.
 **Security:**
 This skill only reads environment variable names (keys), never their values. This prevents accidental exposure of sensitive information.
 
-### `/dev:build-image`
+### `/dev:run-image`
 
-Build and push Docker/OCI images using the official Docker CLI talking to the host's daemon via a mounted `/var/run/docker.sock`.
+Run an existing container image inside a live Kubernetes cluster: launch a pod from the image, inject local files from the CodeMate workspace, and exec commands — all without a local Docker daemon or build toolchain.
 
 **Usage:**
-- Build images from a `Dockerfile` with `docker build`
-- Multi-arch builds (`linux/amd64`, `linux/arm64`) with `docker buildx build --platform ... --push`
-- Push to registries with `docker push`
-- Inspect remote images with `docker buildx imagetools inspect`
+- Launch an arbitrary image as a pod with `kubectl run --restart=Never --command -- sleep infinity`
+- Inject local files via `kubectl cp` (when the image has `tar`) or `kubectl run --stdin` (when it doesn't)
+- Exec the real workload inside the pod with `kubectl exec`
 
 **Runtime requirements:**
-- Launch CodeMate with the Docker socket mounted and the host's docker group passed through:
-  ```bash
-  codemate --branch YOUR_BRANCH \
-    --mount /var/run/docker.sock:/var/run/docker.sock \
-    --docker-param "--group-add $(stat -c %g /var/run/docker.sock)"
-  ```
-  Or set `CODEMATE_MOUNTS` + `DOCKER_PARAMS` in `.env` for the same effect on every run. Fall back to `sudo docker ...` if you skip `--group-add`.
-- **Security:** Mounting `/var/run/docker.sock` grants root-equivalent control of the host daemon to anything running inside CodeMate. Only use this on trusted hosts.
+- Kubeconfig must be available inside the container (see `/dev:manage-k8s` for the mount setup — the same kubeconfig is reused).
+- The target image must already exist in a registry the cluster can pull from.
 
 ### `/dev:manage-k8s`
 
@@ -57,8 +50,8 @@ This plugin is designed to be installed via the CodeMate plugin marketplace.
 /dev:read-env-key
 /dev:read-env-key GIT
 
-# Build and push a container image
-/dev:build-image
+# Run an existing image as a k8s pod with local files
+/dev:run-image
 
 # Manage Kubernetes resources
 /dev:manage-k8s

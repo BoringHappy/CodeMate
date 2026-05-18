@@ -78,22 +78,6 @@ RUN set -euxo pipefail \
     && chmod +x /usr/local/bin/kubectl \
     && curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# Install Docker CLI + buildx plugin from Docker's official apt repo.
-# No daemon is installed — the CLI talks to the host's Docker daemon via a
-# mounted /var/run/docker.sock. The `noble` codename is pinned because Docker
-# CE packages are CLI Go binaries that work on any modern Ubuntu regardless
-# of the host's release codename.
-RUN set -euxo pipefail \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
-    && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
-        > /etc/apt/sources.list.d/docker.list \
-    && apt-get update \
-    && apt-get install -yy --no-install-recommends docker-ce-cli docker-buildx-plugin \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
 # Install AWS CLI v2 (multi-arch: amd64/arm64)
 RUN set -euxo pipefail \
     && ARCH=$(dpkg --print-architecture) \

@@ -61,7 +61,7 @@ The marketplace is fetched from the external repository: `BoringHappy/CodeMatePl
 
 **Dev Plugin** (`dev@codemate`):
 - `/dev:read-env-key` - List environment variable keys
-- `/dev:build-image` - Build and push Docker/OCI images via the Docker CLI talking to the host daemon over a mounted `/var/run/docker.sock`
+- `/dev:run-image` - Run an existing container image as a Kubernetes pod with local files injected from the CodeMate workspace
 - `/dev:manage-k8s` - Interact with Kubernetes clusters using kubectl and helm
 
 **Issue Plugin** (`issue@codemate`):
