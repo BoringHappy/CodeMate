@@ -368,11 +368,9 @@ run_codemate() {
         read -ra _env_params <<< "$DOCKER_PARAMS"
         docker_run_extra+=("${_env_params[@]}")
     fi
-    for param in "${docker_run_extra[@]}"; do
-        if [ -n "$param" ]; then
-            print_info "Adding docker param: $param"
-        fi
-    done
+    if [ ${#docker_run_extra[@]} -gt 0 ]; then
+        print_info "Adding docker params: ${docker_run_extra[*]}"
+    fi
 
     # Extend custom_mounts with CODEMATE_MOUNTS env var (space-separated PATH:PATH specs)
     if [ -n "${CODEMATE_MOUNTS:-}" ]; then
