@@ -7,6 +7,9 @@ source "$(dirname "$0")/shell/common.sh"
 # Configuration
 CLAUDE_SESSION="claude-code"
 
+# Enforce region restriction before launching Claude.
+run_setup_script "$(dirname "$0")/shell/check-region.sh" "Running check-region.sh..."
+
 printf "${GREEN}Starting CodeMate with tmux...${RESET}\n"
 
 # Function to check if a tmux session exists
