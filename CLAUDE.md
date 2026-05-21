@@ -43,7 +43,7 @@ Note: All setup scripts live under `docker/setup/` in the repository, but are co
 
 ### Required Environment Variables
 
-- `CODEMATE_ALLOW_REGION` — comma-separated ip-api.com `region` codes (e.g. `CA,NY`). The launcher refuses to start the container without it, and the container enforces the check at startup.
+- `CODEMATE_ALLOW_REGION` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`). The launcher refuses to start the container without it, and the container enforces the check at startup.
 
 ### Plugin Marketplace
 

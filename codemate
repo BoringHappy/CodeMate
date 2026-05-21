@@ -89,9 +89,9 @@ create_env_file() {
 $(if [ -n "$anthropic_token" ]; then echo "ANTHROPIC_AUTH_TOKEN=$anthropic_token"; else echo "# ANTHROPIC_AUTH_TOKEN="; fi)
 $(if [ -n "$anthropic_url" ]; then echo "ANTHROPIC_BASE_URL=$anthropic_url"; else echo "# ANTHROPIC_BASE_URL="; fi)
 
-# Required: Comma-separated list of ip-api.com 'region' codes the container is
-# allowed to run in. The container queries http://ip-api.com/json/ before
-# starting Claude and exits on mismatch. Example: CODEMATE_ALLOW_REGION=CA,NY
+# Required: Comma-separated list of ip-api.com 'countryCode' values the
+# container is allowed to run in. The container queries http://ip-api.com/json/
+# before starting Claude and exits on mismatch. Example: CODEMATE_ALLOW_REGION=US,CA
 CODEMATE_ALLOW_REGION=
 EOF
     print_success "Created $env_file"
@@ -341,11 +341,11 @@ run_codemate() {
     if [ -z "${CODEMATE_ALLOW_REGION:-}" ]; then
         print_error "CODEMATE_ALLOW_REGION is not set"
         echo ""
-        echo "CodeMate refuses to start without an allowed region. Set the ip-api.com 'region' code(s)"
-        echo "you want to permit (comma-separated for multiple) in your .env file, e.g.:"
+        echo "CodeMate refuses to start without an allowed region. Set the ip-api.com 'countryCode'"
+        echo "value(s) you want to permit (comma-separated for multiple) in your .env file, e.g.:"
         echo ""
-        printf "  ${BLUE}CODEMATE_ALLOW_REGION=CA${NC}\n"
-        printf "  ${BLUE}CODEMATE_ALLOW_REGION=CA,NY,WA${NC}\n"
+        printf "  ${BLUE}CODEMATE_ALLOW_REGION=US${NC}\n"
+        printf "  ${BLUE}CODEMATE_ALLOW_REGION=US,CA,GB${NC}\n"
         echo ""
         exit 1
     fi
@@ -516,9 +516,9 @@ Environment Variables:
   GIT_USER_NAME        Git commit author name
   GIT_USER_EMAIL       Git commit author email
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
-  CODEMATE_ALLOW_REGION  Required. Comma-separated list of ip-api.com 'region' codes the container is
-                       allowed to run in. The container queries http://ip-api.com/json/ before starting
-                       Claude; on mismatch it files a GitHub issue and exits.
+  CODEMATE_ALLOW_REGION  Required. Comma-separated list of ip-api.com 'countryCode' values the container
+                       is allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
+                       before starting Claude; on mismatch it files a GitHub issue and exits.
   DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
   CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.kube:/home/agent/.kube $HOME/.aws:/home/agent/.aws")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops
