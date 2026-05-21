@@ -36,14 +36,14 @@ Parameters:
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
-5. `setup/run.sh` runs `setup/shell/check-region.sh` against `http://ip-api.com/json/`; on mismatch with `CODEMATE_ALLOW_REGION` it files a GitHub issue and exits before Claude launches
+5. `setup/run.sh` runs `setup/shell/check-region.sh` against `http://ip-api.com/json/`; on mismatch with `CODEMATE_ALLOW_COUNTRY` it files a GitHub issue and exits before Claude launches
 6. Claude Code starts with system prompt from `setup/prompt/system_prompt.txt`
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 
 ### Required Environment Variables
 
-- `CODEMATE_ALLOW_REGION` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`). The launcher refuses to start the container without it, and the container enforces the check at startup.
+- `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`). The launcher refuses to start the container without it, and the container enforces the check at startup.
 
 ### Plugin Marketplace
 

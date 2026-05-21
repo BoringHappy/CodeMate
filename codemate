@@ -91,8 +91,8 @@ $(if [ -n "$anthropic_url" ]; then echo "ANTHROPIC_BASE_URL=$anthropic_url"; els
 
 # Required: Comma-separated list of ip-api.com 'countryCode' values the
 # container is allowed to run in. The container queries http://ip-api.com/json/
-# before starting Claude and exits on mismatch. Example: CODEMATE_ALLOW_REGION=US,CA
-CODEMATE_ALLOW_REGION=
+# before starting Claude and exits on mismatch. Example: CODEMATE_ALLOW_COUNTRY=US,CA
+CODEMATE_ALLOW_COUNTRY=
 EOF
     print_success "Created $env_file"
 }
@@ -337,15 +337,15 @@ run_codemate() {
         echo "Create one with: codemate --setup"
     fi
 
-    # Require CODEMATE_ALLOW_REGION so the container can enforce its region check
-    if [ -z "${CODEMATE_ALLOW_REGION:-}" ]; then
-        print_error "CODEMATE_ALLOW_REGION is not set"
+    # Require CODEMATE_ALLOW_COUNTRY so the container can enforce its country check
+    if [ -z "${CODEMATE_ALLOW_COUNTRY:-}" ]; then
+        print_error "CODEMATE_ALLOW_COUNTRY is not set"
         echo ""
-        echo "CodeMate refuses to start without an allowed region. Set the ip-api.com 'countryCode'"
+        echo "CodeMate refuses to start without an allowed country. Set the ip-api.com 'countryCode'"
         echo "value(s) you want to permit (comma-separated for multiple) in your .env file, e.g.:"
         echo ""
-        printf "  ${BLUE}CODEMATE_ALLOW_REGION=US${NC}\n"
-        printf "  ${BLUE}CODEMATE_ALLOW_REGION=US,CA,GB${NC}\n"
+        printf "  ${BLUE}CODEMATE_ALLOW_COUNTRY=US${NC}\n"
+        printf "  ${BLUE}CODEMATE_ALLOW_COUNTRY=US,CA,GB${NC}\n"
         echo ""
         exit 1
     fi
@@ -464,7 +464,7 @@ run_codemate() {
         -e "QUERY=$QUERY"
         -e "NO_PR=$NO_PR"
         -e "CODEMATE_GITHUB_TOKEN=$CODEMATE_GITHUB_TOKEN"
-        -e "CODEMATE_ALLOW_REGION=$CODEMATE_ALLOW_REGION"
+        -e "CODEMATE_ALLOW_COUNTRY=$CODEMATE_ALLOW_COUNTRY"
         -e "GIT_USER_NAME=$GIT_USER_NAME"
         -e "GIT_USER_EMAIL=$GIT_USER_EMAIL"
         -e "TMPDIR=/home/agent/.claude/tmp"
@@ -516,7 +516,7 @@ Environment Variables:
   GIT_USER_NAME        Git commit author name
   GIT_USER_EMAIL       Git commit author email
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
-  CODEMATE_ALLOW_REGION  Required. Comma-separated list of ip-api.com 'countryCode' values the container
+  CODEMATE_ALLOW_COUNTRY  Required. Comma-separated list of ip-api.com 'countryCode' values the container
                        is allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
                        before starting Claude; on mismatch it files a GitHub issue and exits.
   DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
