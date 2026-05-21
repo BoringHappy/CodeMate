@@ -32,12 +32,11 @@ Parameters:
 
 ### Container Startup Flow
 
-1. `setup/setup.sh` orchestrates initialization
+1. `setup/setup.sh` orchestrates initialization, running `setup/shell/check-region.sh` against `http://ip-api.com/json/` first; on mismatch with `CODEMATE_ALLOW_COUNTRY` it files a GitHub issue and exits before any other setup runs
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
-5. `setup/run.sh` runs `setup/shell/check-region.sh` against `http://ip-api.com/json/`; on mismatch with `CODEMATE_ALLOW_COUNTRY` it files a GitHub issue and exits before Claude launches
-6. Claude Code starts with system prompt from `setup/prompt/system_prompt.txt`
+5. `setup/run.sh` launches Claude Code with system prompt from `setup/prompt/system_prompt.txt`
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 

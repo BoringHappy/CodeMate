@@ -6,6 +6,9 @@ SETUP_DIR="/usr/local/bin/setup"
 # Source common utilities
 source "$SETUP_DIR/shell/common.sh"
 
+# Enforce region restriction before launching Claude.
+run_setup_script "$SETUP_DIR/shell/check-region.sh" "Running check-region.sh..."
+
 # Start cron daemon for PR monitoring
 printf "${GREEN}Starting cron daemon...${RESET}\n"
 sudo service cron start || sudo cron || true
