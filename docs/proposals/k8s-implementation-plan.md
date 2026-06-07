@@ -22,7 +22,7 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 
 | Component | New / Reuse | Source today |
 |-----------|-------------|--------------|
-| Operator (webhook server + reconciler) | **New** (Go + controller-runtime, or Python + kopf) | — |
+| Operator (webhook server + reconciler) | **New** (Python + [kopf](https://kopf.readthedocs.io/)) | — |
 | `PRSession` CRD | **New** | — |
 | Delivery sidecar (queue consumer → tmux) | **New** (thin) | logic adapted from `docker/setup/shell/monitor-pr.sh` |
 | Message queue | **New** (Redis Streams / NATS) | replaces `/tmp/pr-monitor-state` |
@@ -38,13 +38,58 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 
 ---
 
+## Repository strategy
+
+**Decision: develop in this repo (monorepo), in new top-level directories — do not split out a
+separate repo yet.**
+
+The operator is tightly coupled to what already lives here: it drives the existing image
+(`docker/Dockerfile`), the sidecar ports logic from `monitor-pr.sh` / `common.sh`, and it depends on
+the existing hooks and `/pr:* /git:* /issue:*` plugins. The strangler migration (Phase 1 edits
+`docker/setup/*` *and* adds operator code at once) is far simpler as atomic PRs in one repo than as a
+coordinated cross-repo dance. One team, early stage, fast iteration, and reuse of existing CI / issue
+templates all favor a monorepo.
+
+The decision is also **low-risk because it's reversible the easy way**: extracting the operator into
+its own repo later (with history, via `git filter-repo`) is cheap; merging two repos you wish were
+one is painful. Start together; split only if the operator gains an independent audience/release
+rhythm or the repo grows unwieldy.
+
+### Target layout (additions, alongside existing dirs)
+
+```
+CodeMate/
+  operator/                 # NEW — Python + kopf operator
+    pyproject.toml          #   isolated deps; its own CI job
+    codemate_operator/
+      webhook.py            #   aiohttp/FastAPI: verify HMAC, map events
+      reconcile.py          #   kopf handlers for PRSession
+      events.py             #   event→message mapping (ported from monitor-pr.sh)
+    sidecar/                #   delivery sidecar (queue consumer → send_and_verify_command)
+    tests/
+  charts/codemate/          # NEW — Helm chart (operator, queue, tunnels, claude-auth PVC)
+  docker/                   # existing — image + setup scripts (sidecar wired in, cron removed)
+  plugins/                  # existing — reused as-is
+```
+
+### Conventions for the monorepo
+- **Separate CI:** add a workflow that runs the operator's Python tests/lint only on `operator/`
+  changes; the existing `docker-build-push.yml` keeps owning the image.
+- **Independent versioning:** tag the operator/chart with a prefix (e.g. `operator/v0.1.0`,
+  `chart/v0.1.0`) so release cadence is decoupled from the image without separate repos.
+- **Plugin version-bump rule** (`.claude/rules/plugin-version-bump.md`) still applies to any
+  `plugins/**` change; operator/chart dirs are outside its scope.
+
+---
+
 ## Phase 1 — Operator webhook server + delivery sidecar (replace cron)
 
 **Goal:** kill the per-container `gh` poll. Events arrive by webhook; the agent is unchanged.
 
 ### 1.1 Operator: webhook server (no CRD yet)
-- [ ] Scaffold the operator service (recommend **Go + controller-runtime**; kopf is fine if the team
-      prefers Python). One binary, HTTP server first.
+- [ ] Scaffold the operator as a **Python + kopf** service (decided — see Repository strategy). kopf
+      runs the reconcile loop; mount an HTTP server alongside it (kopf supports a built-in aiohttp
+      server, or run `aiohttp`/`FastAPI` in the same process) for the webhook endpoint first.
 - [ ] `POST /webhook`: verify `X-Hub-Signature-256` (HMAC, constant-time compare); reject otherwise.
 - [ ] Dedupe on `X-GitHub-Delivery` (in-memory LRU for Phase 1; Redis later).
 - [ ] Map events → messages, mirroring the checks in `monitor-pr.sh`:
@@ -227,10 +272,13 @@ Phase 4 (issue bootstrap + tunnels + dashboard)  ── bootstrap depends on P2;
 `webhook.expose` tunnels (4.2) have no code dependency on P1–P3 and can be built in parallel as
 soon as the operator has a Service.
 
-## Open implementation decisions
+## Decisions & open implementation decisions
 
-- Operator language: **Go + controller-runtime** (mature CRD tooling) vs. **Python + kopf** (matches
-  existing `setup-repo.py`). *Leaning Go* for the reconciler; the event mapper could start in Python.
-- Queue: Redis Streams (simple, ubiquitous) vs. NATS JetStream (lighter, native subjects).
-- Sidecar vs. in-pod cron-style loop for delivery: **sidecar** (cleaner lifecycle, testable).
+- **Operator language — DECIDED: Python + kopf.** Matches the existing Python tooling
+  (`setup-repo.py`, `setup-ccline.py`), keeps the whole repo in bash/python/Docker + a Helm chart
+  (no Go toolchain to add), and lets the event mapper reuse logic ported from `monitor-pr.sh`. kopf
+  handles the CRD watch/reconcile; an aiohttp/FastAPI server in the same process serves the webhook.
+- **Repository — DECIDED: monorepo (this repo).** See [Repository strategy](#repository-strategy).
+- Queue *(open)*: Redis Streams (simple, ubiquitous) vs. NATS JetStream (lighter, native subjects).
+- Delivery *(decided)*: **sidecar** over an in-pod cron-style loop (cleaner lifecycle, testable).
 - See the architecture doc §10 for the broader open questions (transport, persistence, issue linkage).

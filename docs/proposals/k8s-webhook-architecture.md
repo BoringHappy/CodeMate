@@ -505,9 +505,9 @@ pod provisioning and operational tooling.
 1. **Delivery transport:** direct HTTP to a per-pod sidecar vs. a shared durable queue.
    *Recommendation: queue* — durability and crash-redelivery outweigh the added component.
 2. **Workspace persistence:** ephemeral re-checkout vs. PVC-per-PR. *Recommendation: ephemeral.*
-3. **Operator implementation:** full CRD + controller-runtime/kopf (embedded webhook server) vs. a
-   plain service that just manages Deployments by label. Start simple (Phase 1/2), formalize the
-   CRD in Phase 3.
+3. **Operator implementation — DECIDED: Python + kopf** (CRD watch/reconcile) with an embedded
+   aiohttp/FastAPI webhook server, developed in this repo (monorepo). Start simple (Phase 1/2),
+   formalize the CRD in Phase 3. See the implementation plan's *Repository strategy*.
 4. **Concurrency within a PR:** strictly serial runs (proposed) vs. allowing a quick read-only run
    to interleave. Serial is safest for git; revisit if latency hurts.
 5. **Cost controls:** per-repo pod quotas / max concurrent sessions to bound spend.
