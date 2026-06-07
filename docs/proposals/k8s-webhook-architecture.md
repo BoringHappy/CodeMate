@@ -112,10 +112,12 @@ for admission webhooks).
   across the restart.
 
 **C. Per-PR Agent Pod** — the existing CodeMate image, **minus cron but keeping tmux**:
-- **Pod lifetime == PR lifetime** (created when the PR opens, deleted when it closes/merges).
-  One-PR-per-pod is kept on purpose; no idle scale-to-zero, because the persistent tmux session
-  holds in-memory conversation context that reaping mid-PR would discard (see §6).
-- The pod runs the same long-lived Claude `tmux` session as today (`run.sh`).
+- **Logical lifetime == PR lifetime** (the `PRSession` exists from PR open to close/merge), but the
+  pod itself can **scale to zero between events**: the Claude session is bound to the PR and
+  persisted to a shared PVC, so a reaped pod **resumes** that session (`claude --resume`) on the
+  next event with full context — cheap to run, fast to wake (see §6.3).
+- One-PR-per-pod is kept on purpose. The pod runs the same Claude `tmux` session as today (`run.sh`),
+  resumed from disk rather than started cold.
 - A lightweight **delivery sidecar** consumes the PR's queue and, per message, waits for the
   session to be idle, then injects the message into the TUI via `tmux send-keys` using the
   existing `send_and_verify_command`.
@@ -138,9 +140,10 @@ things that change are the *source* and the *trigger* of messages — not how th
 
 Why keep the TUI session rather than going headless (`claude -p` / Agent SDK):
 
-- **Persistent context.** A single long-lived session accumulates the conversation across many
+- **Persistent context.** A single Claude session accumulates the conversation across many
   webhook events (description → review comment → CI failure → follow-up). One-shot headless runs
-  would lose that context every event and have to re-establish it.
+  would lose that context every event and have to re-establish it. Because the session is persisted
+  to a PVC and bound to the PR (§6.3), this context even **survives the pod being scaled to zero**.
 - **Zero rewrite of the proven path.** `send_and_verify_command`, the `/tmp/.session_status` idle
   signal, and the `check_git_changes` Stop hook all carry over unchanged — we are only swapping the
   cron poller for a webhook-fed queue in front of them.
@@ -224,27 +227,30 @@ called out as open question #7.
 
 ## 6. Lifecycle, state & isolation
 
-**A pod's lifecycle is bound 1:1 to its PR's lifecycle:**
+**The `PRSession` is bound 1:1 to its PR's lifecycle; the pod underneath can scale to zero:**
 
 ```
-pull_request.opened ─────► operator creates PRSession → Pod ─────► persistent
-                                                                    tmux session
-   review comments / issue comments / CI events  ──► injected into the live session
-                                                                          │
-pull_request.closed / merged ─────► operator deletes PRSession → Pod  ◄───┘
+pull_request.opened ─────► operator creates PRSession ─────► Pod (resume/boot tmux)
+                                                                   │ handle event
+   review / issue / CI events ──► wake pod (if scaled to 0) → resume session → inject
+                                                                   │ idle N min
+                                                          Pod scaled to zero (session
+                                                          persisted on PVC, PRSession kept)
+pull_request.closed / merged ─────► operator deletes PRSession → Pod + session reaped
 ```
 
-- The pod starts when the PR opens and runs continuously while the PR is open, so its tmux session
-  keeps full conversation context across every webhook event.
-- When the PR is **closed or merged**, the operator tears the pod down (and frees its resources).
-  A reopen recreates a fresh pod.
+- The `PRSession` exists for the whole time the PR is open. The **pod** runs when there's work and
+  may **scale to zero when idle**; the next event wakes it and it **resumes** the PR's Claude
+  session from the PVC (§6.3), so conversation context is preserved across the gap.
+- When the PR is **closed or merged**, the operator deletes the `PRSession`; the pod and the
+  PR-bound session are reaped. A reopen recreates the `PRSession` (and resumes if the session blob
+  still exists).
 - **Mapping:** `PRSession` CRD keyed by `repo + pr`; pods labeled `codemate.io/repo`,
   `codemate.io/pr`. The operator finds a session by label, never by host.
-- **Workspace:** ephemeral — git is the source of truth, so a *crash-restarted* pod just
-  re-checks-out the PR branch. (PVC-per-PR is an option if warm caches matter; recommend ephemeral.)
+- **Workspace:** ephemeral — git is the source of truth, so a woken/restarted pod just
+  re-checks-out the PR branch. Only the Claude *session* state is persisted (§6.3), not the checkout.
 - **State that used to live in `/tmp/pr-monitor-state`** (last-checked time, dedupe, CI-notified
-  flags) moves to the queue/Redis or `PRSession.status` — durable and centrally visible. In-session
-  conversation context is intentionally *not* persisted; it lives only for the pod's (== PR's) life.
+  flags) moves to the queue/Redis or `PRSession.status` — durable and centrally visible.
 - **One PR per pod** is retained on purpose: isolated git checkout, independent crash blast radius,
   per-PR CPU/mem limits, trivial routing. Scaling = more pods, scheduled by k8s.
 
@@ -301,9 +307,13 @@ spec:
   # Reuses the same knobs codemate/.env already passes to the container today.
   image: ghcr.io/boringhappy/codemate:latest
   systemPromptRef: standard                 # standard | opensource
+  claudeAuth:                                # shared, pre-authenticated Claude creds (§6.3)
+    pvcName: codemate-claude-auth            # RWX PVC holding ~/.claude + ~/.claude.json
+    mountReadOnly: true
   resources:
     requests: { cpu: "500m", memory: 1Gi }
     limits:   { cpu: "2",    memory: 4Gi }
+  idleTimeoutSeconds: 600                    # scale pod to zero after this idle (0 = never)
   env:                                       # non-secret; secrets come from secretRefs
     - name: CODEMATE_ALLOW_COUNTRY
       value: "US,CA"
@@ -321,6 +331,8 @@ status:
   lastEventDeliveryId: "a1b2c3d4-..."        # dedupe cursor (replaces /tmp/pr-monitor-state)
   lastEventAt: "2026-06-07T10:32:00Z"
   sessionStatus: Stop                        # mirror of /tmp/.session_status (idle/busy)
+  claudeSessionId: "9f3c...e21"              # PR-bound Claude session, resumed on wake (§6.3)
+  scaledToZero: false                        # true while the pod is reaped between events
   queue:
     pending: 0
     inFlight: 0
@@ -339,6 +351,45 @@ Notes:
   `sessionStatus` mirrors the idle/busy hook signal, and `queue.pending` shows backpressure.
 - **Secrets stay out of the CR**; only references are stored, resolved to projected pod secrets.
 
+### 6.3 Claude auth & session persistence
+
+Two problems are solved by a **single shared PVC** holding Claude's home state
+(`~/.claude/` and `~/.claude.json`):
+
+**(a) Authentication — log in once, reuse everywhere.**
+Instead of every pod authenticating Claude independently, a one-time **auth init pod** does the
+login interactively and writes the credentials to the shared PVC:
+
+```bash
+# one-time, by an operator/admin:
+kubectl apply -f codemate-auth-init.yaml          # pod that mounts the codemate-claude-auth PVC
+kubectl exec -it codemate-auth-init -- claude      # complete `claude login` (OAuth/API key)
+# credentials now live on the PVC at ~/.claude.json + ~/.claude/
+kubectl delete pod codemate-auth-init             # init pod no longer needed
+```
+
+Every PR pod then mounts the same PVC (default **read-only**) at the Claude home path and reuses
+those credentials — no per-pod login. Re-running the init pod refreshes/rotates the login.
+
+> **Access mode & write races.** The PVC must be **RWX** (e.g. NFS / CephFS / cloud filestore) so
+> many pods mount it at once. Credentials are mounted read-only by agent pods to avoid concurrent
+> writes to `~/.claude.json` (token refresh is done only by the init pod). Per-PR *session* blobs
+> (below) are written, so they live in a per-PR subdirectory to avoid cross-pod contention.
+
+**(b) Session persistence — bind a Claude session to the PR for fast scale-to-zero.**
+Claude Code persists each conversation as a resumable **session** under `~/.claude/`. We store the
+PR's session on the PVC (keyed by `repo#pr`, recorded in `status.claudeSessionId`) so:
+
+- when a pod boots/wakes, `run.sh` starts Claude with `--resume <claudeSessionId>` instead of cold —
+  the full PR conversation context is restored from disk;
+- therefore the pod can be **scaled to zero after `idleTimeoutSeconds`** of no events and recreated
+  on the next webhook, **without losing context** — turning the cost/context tradeoff of §3.1 into
+  "cheap when idle, warm when needed";
+- on PR close/merge the operator deletes the PR's session blob alongside the pod.
+
+This is what makes the lifecycle in §6 affordable: a PR can stay open for days while its pod
+consumes resources only during the seconds it is actually working.
+
 ## 7. Security
 
 - **Webhook auth:** HMAC `X-Hub-Signature-256` verified by the operator's webhook server; reject otherwise.
@@ -351,6 +402,15 @@ Notes:
   inbound hole in the cluster firewall at all).
 - **Blast radius:** `--dangerously-skip-permissions` stays, but now each PR runs in its own pod
   with k8s resource limits and network isolation — a strictly tighter sandbox than a shared host.
+- **Shared Claude credentials (§6.3):** the auth PVC is mounted **read-only** by agent pods and
+  reachable only by the CodeMate namespace (RBAC + the PVC's storage class). All PR pods share one
+  Claude login, so it is a shared-fate credential — acceptable while the trust model below is
+  deferred, but worth revisiting if untrusted repos are ever co-tenanted.
+- **Deferred — prompt-injection / author trust model.** Because the agent acts on issue/PR text and
+  runs with skip-permissions, untrusted authors could attempt to steer it (e.g. exfiltrate the
+  token). Author-association gating, command allowlists, and secret-from-context hardening are
+  **explicitly out of scope for this proposal** and tracked as future work (open question #8). The
+  egress NetworkPolicy above is the only mitigation in place for now.
 
 ## 8. Exposing the webhook endpoint (tunnels & ingress)
 
@@ -433,8 +493,8 @@ frpc:
 |-------|-------------|------|
 | **0** | *(today)* cron polling + tmux in a single container | — |
 | **1** | Stand up the operator with just its embedded webhook server; replace the in-container cron poll with a webhook-fed inbox sidecar that injects into the **existing tmux session** via `send_and_verify_command`. Prove event parity with `monitor-pr.sh`. | Low — reuses image, tmux path & skills |
-| **2** | Add the operator's reconciler + `PRSession` CRD; auto-provision a pod on `pull_request.opened` and **tear it down on `pull_request.closed`/merged** (no more manual `codemate --pr`). | Medium |
-| **3** | Durable queue (Redis Streams/NATS) + periodic GitHub resync backstop + GitHub App auth + per-repo session quotas. | Medium |
+| **2** | Add the operator's reconciler + `PRSession` CRD; **shared Claude-auth PVC + one-time auth init pod** (§6.3); auto-provision a pod on `pull_request.opened` and **tear it down on `pull_request.closed`/merged** (no more manual `codemate --pr`). | Medium |
+| **3** | Durable queue (Redis Streams/NATS) + periodic GitHub resync backstop + **PR-bound session resume → idle scale-to-zero** (§6.3) + GitHub App auth + per-repo session quotas. | Medium |
 | **4** | Multi-repo, web dashboard of active sessions, requirement-issue → auto-spawn. | — |
 
 The existing `dev:run-image` / `dev:manage-k8s` plugins are natural building blocks for Phase 2's
@@ -456,15 +516,24 @@ pod provisioning and operational tooling.
 7. **Mandatory issue linkage:** enforce "every PR must close an issue" (clean traceability, single
    model) vs. allow issue-less direct PRs. *Leaning: bootstrap-from-issue is the default/recommended
    path, but don't hard-reject direct PRs unless a repo opts in.*
+8. **Trust / prompt-injection model (deferred):** the agent acts on untrusted issue/PR text under
+   skip-permissions. Author-association gating, command allowlists, and keeping secrets out of model
+   context are **out of scope for now**; egress NetworkPolicy is the only current mitigation. Must be
+   designed before exposing this to repos with untrusted external contributors.
+9. **Auth PVC storage:** requires an **RWX** storage class (NFS/CephFS/cloud filestore) for many
+   pods to share `~/.claude`. Credentials mounted read-only; per-PR session blobs in per-PR subdirs
+   to avoid write contention. Confirm the target cluster has an RWX provisioner.
 
 ## 11. Summary
 
 Move the GitHub-watching logic *out* of every container and into a single **Kubernetes operator**
 (the middle layer) that both **receives the GitHub webhook** (embedded HTTPS server) and **controls
 the pods** (reconciles `PRSession` CRs). Lifecycle events create/delete the CR; content events are
-routed through a **durable per-PR queue**. The operator runs **one persistent-tmux Claude pod per
-PR**, with the **pod's lifecycle bound to the PR's** (created on open, destroyed on close/merge),
-and a **periodic GitHub resync** self-heals any missed webhook. Webhook messages are injected into
+routed through a **durable per-PR queue**. The operator runs **one tmux Claude pod per PR**, bound
+to the PR's lifecycle; pods **scale to zero when idle** and **resume the PR's Claude session** from
+a shared PVC on the next event, so a long-open PR costs resources only while actually working. That
+same PVC holds Claude credentials authenticated **once** by an auth init pod and reused by every
+pod. A **periodic GitHub resync** self-heals any missed webhook. Webhook messages are injected into
 the live TUI via the existing `send_and_verify_command`, preserving conversation context across
 events. The webhook endpoint is exposed to GitHub via a Helm-selectable backend — **Cloudflare
 Tunnel (`cloudflared`)**, **frpc**, both, or a plain ingress — so even a private/home cluster with

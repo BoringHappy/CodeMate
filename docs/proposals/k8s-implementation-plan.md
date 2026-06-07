@@ -26,6 +26,9 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 | `PRSession` CRD | **New** | — |
 | Delivery sidecar (queue consumer → tmux) | **New** (thin) | logic adapted from `docker/setup/shell/monitor-pr.sh` |
 | Message queue | **New** (Redis Streams / NATS) | replaces `/tmp/pr-monitor-state` |
+| Shared Claude-auth PVC (`~/.claude`, `~/.claude.json`) | **New** (RWX) | replaces per-container Claude login |
+| Claude auth init pod | **New** (one-time `claude login` via `kubectl exec`) | — |
+| PR-bound Claude session store + resume | **New** | `run.sh` gains `claude --resume` |
 | Agent pod image | **Modify** | `docker/Dockerfile`, `docker/setup/*` (drop cron) |
 | Tmux launch + injection | **Reuse** | `docker/setup/run.sh`, `common.sh::send_and_verify_command` |
 | Idle/commit hooks | **Reuse** | `plugins/workspace/hooks/*` |
@@ -87,11 +90,28 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 - [ ] **Periodic resync:** every N min, list open PRs via API and converge (self-heal missed webhooks).
 - [ ] Populate `.status` (phase, podName, prState, lastEventDeliveryId, sessionStatus, queue depth).
 
-### 2.3 Acceptance criteria
+### 2.4 Claude auth: shared PVC + auth init pod (proposal §6.3)
+- [ ] Provision an **RWX** PVC `codemate-claude-auth` (confirm cluster has an NFS/CephFS/filestore
+      provisioner). Holds `~/.claude/` and `~/.claude.json`.
+- [ ] Ship an **auth init pod** manifest that mounts the PVC; admin runs `kubectl exec -it ... --
+      claude` once to complete `claude login`. Document the rotation/refresh procedure (re-run init).
+- [ ] Mount the PVC **read-only** at the Claude home path in every PR pod; remove any per-pod Claude
+      login from the image/startup. Verify a fresh pod uses the shared creds with no interactive step.
+- [ ] Guard against `~/.claude.json` write races: agent pods RO; only the init pod writes creds.
+
+### 2.5 PR-bound Claude session (foundation for scale-to-zero)
+- [ ] On first run, capture the Claude session id and record it in `PRSession.status.claudeSessionId`;
+      store the session blob under a per-PR subdir on the PVC (avoids cross-pod contention).
+- [ ] Modify `run.sh` to start with `claude --resume <claudeSessionId>` when one exists, else cold.
+- [ ] On PR close/merge, delete the PR's session blob alongside the pod.
+
+### 2.6 Acceptance criteria
 - Opening a PR auto-creates a pod that picks up the PR description as the seed message.
-- Closing/merging deletes the pod within one reconcile.
+- A fresh PR pod authenticates Claude purely from the shared PVC — no per-pod login.
+- Closing/merging deletes the pod (and session blob) within one reconcile.
 - `kubectl get prsessions` lists every active agent across repos.
-- Killing a pod → reconciler recreates it and the queue redelivers unacked messages.
+- Killing a pod → reconciler recreates it, **resumes the same Claude session** (context intact), and
+  the queue redelivers unacked messages.
 
 ---
 
@@ -109,12 +129,19 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 - [ ] Project tokens into pods via mounted secrets (rotate on expiry). Remove the long-lived token
       from the image/`.env` flow.
 
-### 3.3 Quotas / cost control
-- [ ] Per-repo max concurrent `PRSession`s; ResourceQuota per namespace.
+### 3.3 Idle scale-to-zero via session resume (proposal §6.3)
+- [ ] Reconciler watches `status.sessionStatus` + queue depth; after `spec.idleTimeoutSeconds` with
+      no work, scale the pod to zero and set `status.scaledToZero=true` (keep the `PRSession`).
+- [ ] On the next event, wake the pod; `run.sh` resumes from `claudeSessionId` so context is intact.
+- [ ] Tune `idleTimeoutSeconds` default; ensure wake latency (pull image + resume) is acceptable.
+
+### 3.4 Quotas / cost control
+- [ ] Per-repo max concurrent *active* `PRSession`s; ResourceQuota per namespace.
 - [ ] `log()`/metrics when sessions are queued/rejected due to quota (no silent capping).
 
-### 3.4 Acceptance criteria
+### 3.5 Acceptance criteria
 - Operator restart loses no events (queue durability + redelivery).
+- An idle PR's pod scales to zero, then wakes on the next event with **full context restored**.
 - No long-lived PAT anywhere; tokens are per-repo and short-lived.
 - Exceeding the quota queues/blocks new sessions visibly.
 
@@ -153,7 +180,7 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 ```
 charts/codemate/
   Chart.yaml
-  values.yaml                 # operator, queue, webhook.expose, cloudflare, frpc, quotas
+  values.yaml                 # operator, queue, webhook.expose, cloudflare, frpc, claudeAuth, quotas
   crds/
     prsession.yaml
   templates/
@@ -161,6 +188,8 @@ charts/codemate/
     operator-rbac.yaml        # watch/create/delete pods + prsessions
     operator-service.yaml
     queue.yaml                # or external dependency
+    claude-auth-pvc.yaml      # RWX PVC for shared ~/.claude + ~/.claude.json
+    claude-auth-init-pod.yaml # one-time `claude login` helper (kubectl exec)
     cloudflared-deployment.yaml   # rendered when expose.mode in (cloudflare, both)
     frpc-deployment.yaml          # rendered when expose.mode in (frpc, both)
     ingress.yaml                  # rendered when expose.mode == ingress
@@ -177,6 +206,11 @@ charts/codemate/
   cloudflared/frpc" guide.
 - **Backward compatibility:** keep `codemate --pr/--branch` working as a local/dev path during the
   migration; the operator path is opt-in per repo until Phase 3 is stable.
+- **Prerequisite — RWX storage:** Phase 2's shared Claude-auth PVC needs a ReadWriteMany storage
+  class (NFS/CephFS/cloud filestore). Verify on the target cluster before starting Phase 2.
+- **Deferred — trust/prompt-injection model:** per the architecture doc (open question #8), gating
+  who can trigger the agent and hardening against injection is **out of scope** for this plan. Do
+  **not** point the operator at repos with untrusted external contributors until that work lands.
 
 ## Sequencing & dependencies
 
