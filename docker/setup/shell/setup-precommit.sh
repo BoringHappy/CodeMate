@@ -25,21 +25,9 @@ fi
 
 printf "${YELLOW}Setting up pre-commit hooks...${RESET}\n"
 
-# Ensure the pre-commit CLI is available, installing it if necessary.
+# pre-commit is installed in the base image (see docker/Dockerfile.base).
 if ! command -v pre-commit >/dev/null 2>&1; then
-    printf "  Installing pre-commit...\n"
-    if command -v uv >/dev/null 2>&1 && uv tool install pre-commit 2>&1; then
-        printf "  ${GREEN}✓ pre-commit installed via uv${RESET}\n"
-    elif pip3 install --user pre-commit 2>&1; then
-        printf "  ${GREEN}✓ pre-commit installed via pip${RESET}\n"
-    else
-        printf "  ${RED}✗ Failed to install pre-commit, skipping setup${RESET}\n"
-        exit 0
-    fi
-fi
-
-if ! command -v pre-commit >/dev/null 2>&1; then
-    printf "  ${RED}✗ pre-commit not on PATH after install, skipping setup${RESET}\n"
+    printf "  ${RED}✗ pre-commit not found on PATH, skipping setup${RESET}\n"
     exit 0
 fi
 
