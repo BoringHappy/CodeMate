@@ -70,8 +70,8 @@ This is efficient for a single PR, but has structural limits:
                         ▼
         ┌───────────────────────────────────┐
         │   Session Controller (operator)    │   reconciles PRSession CRDs:
-        │                                     │   ensure a pod exists for any
-        │                                     │   PR with pending work; reap idle
+        │                                     │   pod exists while PR is open;
+        │                                     │   deleted on PR close/merge
         └───────────────┬───────────────────┘
                         │ create/scale/delete
           ┌─────────────┼───────────────────────────────┐
@@ -102,7 +102,8 @@ This is efficient for a single PR, but has structural limits:
 
 **B. Message Queue / Inbox** — durable buffer (Redis Streams or NATS JetStream):
 - Per-PR ordering and at-least-once delivery; survives pod restarts (fixes pain #5).
-- Lets the controller scale a pod to zero and replay buffered events when it comes back.
+- If a pod crashes and is rescheduled, unacked messages are redelivered — no events are lost
+  across the restart.
 
 **C. Session Controller (operator)** — reconciles a `PRSession` custom resource:
 - **Pod lifetime == PR lifetime.** Create exactly one pod when a PR opens (or on its first event);
@@ -190,6 +191,98 @@ pull_request.closed / merged ─────► controller deletes Pod  ◄─�
 - **One PR per pod** is retained on purpose: isolated git checkout, independent crash blast radius,
   per-PR CPU/mem limits, trivial routing. Scaling = more pods, scheduled by k8s.
 
+### 6.1 End-to-end sequence
+
+A single event — a reviewer leaving an inline comment — flows like this:
+
+```
+GitHub        Gateway         Queue          Controller     Sidecar         tmux/Claude
+  │              │              │                 │             │                 │
+  │ pull_request_review_comment │                 │             │                 │
+  ├─────────────►│              │                 │             │                 │
+  │              │ verify HMAC  │                 │             │                 │
+  │              │ dedupe(delivery_id)            │             │                 │
+  │              ├─ enqueue ────►│ (key=repo#pr)  │             │                 │
+  │              │              │                 │             │                 │
+  │              │              │  PRSession for repo#pr exists? │                 │
+  │              │              │◄────────────────┤ (pod already up; PR is open)  │
+  │              │              │                 │             │                 │
+  │              │              │  consume(repo#pr)             │                 │
+  │              │              │◄────────────────────────────┤ (sidecar pulls) │
+  │              │              │                 │             │ wait for idle   │
+  │              │              │                 │             │ (.session_status│
+  │              │              │                 │             │   ends in Stop) │
+  │              │              │                 │             │ send_and_verify ├────►│
+  │              │              │                 │             │                 │ /pr:fix-comments
+  │              │              │                 │             │                 │ edit → /git:commit → push
+  │              │              │                 │             │ ack (eyes 👀)   │◄────┤
+  │              │              │◄ ack message ───┤ (on Stop)   │                 │
+```
+
+For `pull_request.opened` the only difference is an extra first step: the controller **creates**
+the `PRSession`/pod, which boots the tmux session (`run.sh`) before the sidecar delivers the PR
+description as the seed message. For `pull_request.closed`/merged the controller **deletes** the
+`PRSession`, and Kubernetes garbage-collects the pod.
+
+### 6.2 `PRSession` custom resource
+
+The controller reconciles one `PRSession` per open PR. It is the single source of truth for
+"which PRs have a live agent" — replacing the scattered, host-bound tmux sessions of today.
+
+```yaml
+apiVersion: codemate.io/v1alpha1
+kind: PRSession
+metadata:
+  name: boringhappy-codemate-pr-241        # <owner>-<repo>-pr-<number>, DNS-safe
+  namespace: codemate
+  labels:
+    codemate.io/repo: BoringHappy/CodeMate
+    codemate.io/pr: "241"
+spec:
+  repo: https://github.com/BoringHappy/CodeMate.git
+  prNumber: 241
+  branch: proposal-k8s-design
+  # Reuses the same knobs codemate/.env already passes to the container today.
+  image: ghcr.io/boringhappy/codemate:latest
+  systemPromptRef: standard                 # standard | opensource
+  resources:
+    requests: { cpu: "500m", memory: 1Gi }
+    limits:   { cpu: "2",    memory: 4Gi }
+  env:                                       # non-secret; secrets come from secretRefs
+    - name: CODEMATE_ALLOW_COUNTRY
+      value: "US,CA"
+  secretRefs:                                # projected into the pod, not stored in the CR
+    - githubAppInstallationToken             # short-lived, minted by the gateway
+    - slackWebhook
+  # Lifecycle is driven by GitHub state, surfaced here for observability/manual override.
+  lifecycle:
+    bindToPR: true                           # delete pod when PR closes/merges (default)
+    deleteOnMerge: true
+status:
+  phase: Running                             # Pending | Running | Closing | Terminated
+  podName: codemate-pr-241-7c9f8
+  prState: open                              # mirror of GitHub PR state
+  lastEventDeliveryId: "a1b2c3d4-..."        # dedupe cursor (replaces /tmp/pr-monitor-state)
+  lastEventAt: "2026-06-07T10:32:00Z"
+  sessionStatus: Stop                        # mirror of /tmp/.session_status (idle/busy)
+  queue:
+    pending: 0
+    inFlight: 0
+  conditions:
+    - type: PodReady
+      status: "True"
+    - type: SessionIdle
+      status: "True"
+```
+
+Notes:
+- **Creation/deletion** is driven by GitHub: the gateway (or controller watching the events)
+  creates the CR on `pull_request.opened` and deletes it on `closed`/merged. `kubectl get prsessions`
+  then lists every active agent across all repos — the management surface that's missing today.
+- **`status` absorbs the old `/tmp/pr-monitor-state`**: `lastEventDeliveryId` is the dedupe cursor,
+  `sessionStatus` mirrors the idle/busy hook signal, and `queue.pending` shows backpressure.
+- **Secrets stay out of the CR**; only references are stored, resolved to projected pod secrets.
+
 ## 7. Security
 
 - **Webhook auth:** HMAC `X-Hub-Signature-256` verified at the gateway; reject otherwise.
@@ -206,7 +299,7 @@ pull_request.closed / merged ─────► controller deletes Pod  ◄─�
 | Phase | Deliverable | Risk |
 |-------|-------------|------|
 | **0** | *(today)* cron polling + tmux in a single container | — |
-| **1** | Stand up the gateway; convert the agent to **headless** runs driven by an HTTP inbox; disable cron. Prove event parity with `monitor-pr.sh`. | Low — reuses image & skills |
+| **1** | Stand up the gateway; replace the in-container cron poll with a webhook-fed inbox sidecar that injects into the **existing tmux session** via `send_and_verify_command`. Prove event parity with `monitor-pr.sh`. | Low — reuses image, tmux path & skills |
 | **2** | Add the controller + `PRSession` CRD; auto-provision a pod on `pull_request.opened` and **tear it down on `pull_request.closed`/merged** (no more manual `codemate --pr`). | Medium |
 | **3** | Durable queue (Redis Streams/NATS) + GitHub App auth + per-repo session quotas. | Medium |
 | **4** | Multi-repo, web dashboard of active sessions, requirement-issue → auto-spawn. | — |
@@ -217,7 +310,7 @@ pod provisioning and operational tooling.
 ## 9. Open questions
 
 1. **Delivery transport:** direct HTTP to a per-pod sidecar vs. a shared durable queue.
-   *Recommendation: queue* — durability, replay, and scale-to-zero outweigh the added component.
+   *Recommendation: queue* — durability and crash-redelivery outweigh the added component.
 2. **Workspace persistence:** ephemeral re-checkout vs. PVC-per-PR. *Recommendation: ephemeral.*
 3. **Operator implementation:** full CRD + controller-runtime/kopf vs. a plain service that just
    manages Deployments by label. Start simple (Phase 1/2), formalize the CRD in Phase 3.
