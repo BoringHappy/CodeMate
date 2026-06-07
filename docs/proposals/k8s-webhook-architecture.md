@@ -50,70 +50,71 @@ This is efficient for a single PR, but has structural limits:
 
 ## 3. Architecture Overview
 
+The middle layer is a **single Kubernetes operator** that both *receives the GitHub webhook* and
+*controls the pods*. There is no separate gateway service: the operator runs an embedded HTTPS
+webhook server in the same process as its reconcile manager (the same pattern operators already use
+for admission webhooks).
+
 ```
-                      GitHub
-   (PR opened / review comment / issue comment / review / check_suite / push)
-                        │  webhook (HMAC-signed)
-                        ▼
-        ┌───────────────────────────────────┐
-        │      Webhook Gateway (middle       │   - verify X-Hub-Signature-256
-        │      layer, always-on Service)     │   - normalize event → PRTask
-        │                                    │   - dedupe, route by repo+PR
-        └───────────────┬───────────────────┘
-                        │ enqueue PRTask (key = repo#pr)
-                        ▼
-        ┌───────────────────────────────────┐
-        │   Message Queue / Inbox            │   Redis Streams / NATS
-        │   (durable, per-PR ordering)       │   one consumer group per PR
-        └───────────────┬───────────────────┘
-                        │
-                        ▼
-        ┌───────────────────────────────────┐
-        │   Session Controller (operator)    │   reconciles PRSession CRDs:
-        │                                     │   pod exists while PR is open;
-        │                                     │   deleted on PR close/merge
-        └───────────────┬───────────────────┘
-                        │ create/scale/delete
-          ┌─────────────┼───────────────────────────────┐
-          ▼             ▼                                 ▼
-   ┌────────────┐  ┌────────────┐                  ┌────────────┐
-   │ Pod: PR #1 │  │ Pod: PR #2 │      ...         │ Pod: PR #N │
-   │ ┌────────┐ │  │            │                  │            │
-   │ │sidecar │ │  drain queue → wait for idle (/tmp/.session_status)
-   │ │ (loop) │ │  → tmux send-keys (send_and_verify_command)
-   │ └───┬────┘ │  │            │                  │            │
-   │ ┌───▼────┐ │  persistent Claude `tmux` session reviews code,
-   │ │ tmux   │ │  commits/pushes via /git:commit
-   │ │ Claude │ │  │            │                  │            │
-   │ └────────┘ │  │            │                  │            │
-   │ git checkout of PR branch (isolated workspace) │            │
-   └────────────┘  └────────────┘                  └────────────┘
+                         GitHub
+   (PR opened/closed · review comment · issue comment · review · check_suite)
+                            │  webhook (HMAC-signed)            ▲
+                            ▼                                   │ periodic resync
+   ┌────────────────────────────────────────────────────────────────────────┐
+   │                  CodeMate Operator  (single deployment)                  │
+   │  ┌───────────────────────────┐      ┌────────────────────────────────┐  │
+   │  │ embedded webhook server    │      │ PRSession reconciler           │  │
+   │  │ - verify X-Hub-Signature   │─────►│ - ensure Pod == PRSession spec │  │
+   │  │ - dedupe (delivery id)     │ CR   │ - create on open / delete on   │  │
+   │  │ - lifecycle → create/del CR│ ops  │   close · update .status       │  │
+   │  │ - content   → enqueue msg  │      │ - periodic GitHub resync       │  │
+   │  └─────────────┬─────────────┘      └────────────────┬───────────────┘  │
+   └────────────────┼───────────────────────────────────-┼──────────────────┘
+                    │ enqueue message (key=repo#pr)        │ create / delete Pod
+                    ▼                                      ▼
+          ┌───────────────────┐               ┌──────────────────────────────┐
+          │ Queue (per-PR      │               │ Pod: one per open PR          │
+          │ ordering, durable) │               │ ┌────────┐   ┌─────────────┐  │
+          └─────────┬─────────┘               │ │sidecar │──►│ tmux/Claude  │  │
+                    │ consume → wait idle      │ │ (loop) │   │ (persistent) │  │
+                    │ → send_and_verify_command│ └────────┘   └─────────────┘  │
+                    └─────────────────────────►│ git checkout of PR branch     │
+                                               └──────────────────────────────┘
 ```
 
 ### 3.1 Components
 
-**A. Webhook Gateway (the "middle layer")** — small always-on service:
-- Public HTTPS endpoint behind ingress; verifies `X-Hub-Signature-256` HMAC.
-- Normalizes each GitHub event into an internal `PRTask` `{repo, pr, kind, payload, delivery_id}`.
-- Dedupes on GitHub `X-GitHub-Delivery` id; enqueues keyed by `repo#pr` so a PR's events stay ordered.
-- Stateless and horizontally scalable.
-- It is the *source* of messages (replacing the in-container `gh` poll); delivery into the
-  session still happens via `tmux send-keys` inside the pod (see §4).
+**A. CodeMate Operator (the middle layer)** — one deployment, two cooperating parts:
+
+*Embedded webhook server* (served by all replicas, stateless):
+- HTTPS endpoint exposed publicly via an ingress *or* an outbound tunnel (Cloudflare Tunnel / frpc
+  — see §8); verifies `X-Hub-Signature-256` HMAC; dedupes on the GitHub `X-GitHub-Delivery` id.
+- **Lifecycle events** (`opened`/`reopened`/`closed`/merged) → create or delete the `PRSession`
+  custom resource. It does *not* touch pods directly — it only edits desired state.
+- **Content events** (comments, reviews, CI results) → enqueue a message keyed by `repo#pr`.
+
+*Reconciler* (runs under leader election):
+- Watches `PRSession` CRs and makes the cluster match them: one pod per open PR, with resource
+  limits and network policy; deletes the pod when the CR is removed. Updates `.status`.
+- **Periodic GitHub resync:** every N minutes it lists open PRs via the API and reconciles,
+  self-healing any webhook that was missed during an outage — a level-triggered backstop the
+  cron design never had.
+
+> Why one operator instead of a gateway + controller: the operator already runs a manager loop, so
+> adding an HTTP listener to it is cheap and removes a moving part. Splitting *lifecycle → CR* from
+> *content → queue* keeps the reconcile model clean — CRs carry **desired state** ("this PR should
+> have a pod"), while the queue carries **ordered event data** ("deliver this exact comment"), which
+> a CR models poorly.
 
 **B. Message Queue / Inbox** — durable buffer (Redis Streams or NATS JetStream):
 - Per-PR ordering and at-least-once delivery; survives pod restarts (fixes pain #5).
 - If a pod crashes and is rescheduled, unacked messages are redelivered — no events are lost
   across the restart.
 
-**C. Session Controller (operator)** — reconciles a `PRSession` custom resource:
-- **Pod lifetime == PR lifetime.** Create exactly one pod when a PR opens (or on its first event);
-  keep it running for the entire open lifetime; **shut it down when the PR is closed/merged**.
-- One-PR-per-pod, kept on purpose; applies resource limits and network policy.
-- No idle scale-to-zero: the persistent tmux session holds in-memory conversation context, so
-  reaping it mid-PR would discard that context. The PR's open/closed state *is* the lifecycle
-  signal (see §6).
-
-**D. Per-PR Agent Pod** — the existing CodeMate image, **minus cron but keeping tmux**:
+**C. Per-PR Agent Pod** — the existing CodeMate image, **minus cron but keeping tmux**:
+- **Pod lifetime == PR lifetime** (created when the PR opens, deleted when it closes/merges).
+  One-PR-per-pod is kept on purpose; no idle scale-to-zero, because the persistent tmux session
+  holds in-memory conversation context that reaping mid-PR would discard (see §6).
 - The pod runs the same long-lived Claude `tmux` session as today (`run.sh`).
 - A lightweight **delivery sidecar** consumes the PR's queue and, per message, waits for the
   session to be idle, then injects the message into the TUI via `tmux send-keys` using the
@@ -149,7 +150,7 @@ message, verify submission" logic — but woken by a queue message instead of a 
 
 ## 5. Event → action mapping
 
-The gateway replaces every check currently in `monitor-pr.sh`:
+The operator's webhook handler replaces every check currently in `monitor-pr.sh`:
 
 | GitHub webhook | Action delivered to the PR pod |
 |----------------|--------------------------------|
@@ -159,10 +160,10 @@ The gateway replaces every check currently in `monitor-pr.sh`:
 | `pull_request_review.submitted` | Run with the review summary as context |
 | `pull_request.ready_for_review` | Run `/pr:update` to refresh title/description |
 | `check_suite.completed` / `check_run.completed` (failure) | Fetch failing logs, run a fix, `/git:commit` |
-| `pull_request.closed` / merged | Controller reaps the pod |
+| `pull_request.closed` / merged | Operator deletes the `PRSession` → reconciler reaps the pod |
 | `issues.opened` / `issue_comment` (requirement issues) | Optionally spawn a "spec" session before a PR exists |
 
-Note the last row: because requirements can be written in **issue** comments too, the gateway can
+Note the last row: because requirements can be written in **issue** comments too, the operator can
 kick off work that *creates* a PR, not just react to an existing one.
 
 ## 6. Lifecycle, state & isolation
@@ -170,19 +171,19 @@ kick off work that *creates* a PR, not just react to an existing one.
 **A pod's lifecycle is bound 1:1 to its PR's lifecycle:**
 
 ```
-pull_request.opened ─────► controller creates Pod (PRSession) ─────► persistent
-                                                                      tmux session
+pull_request.opened ─────► operator creates PRSession → Pod ─────► persistent
+                                                                    tmux session
    review comments / issue comments / CI events  ──► injected into the live session
                                                                           │
-pull_request.closed / merged ─────► controller deletes Pod  ◄────────────┘
+pull_request.closed / merged ─────► operator deletes PRSession → Pod  ◄───┘
 ```
 
 - The pod starts when the PR opens and runs continuously while the PR is open, so its tmux session
   keeps full conversation context across every webhook event.
-- When the PR is **closed or merged**, the controller tears the pod down (and frees its resources).
+- When the PR is **closed or merged**, the operator tears the pod down (and frees its resources).
   A reopen recreates a fresh pod.
 - **Mapping:** `PRSession` CRD keyed by `repo + pr`; pods labeled `codemate.io/repo`,
-  `codemate.io/pr`. The gateway/controller find a session by label, never by host.
+  `codemate.io/pr`. The operator finds a session by label, never by host.
 - **Workspace:** ephemeral — git is the source of truth, so a *crash-restarted* pod just
   re-checks-out the PR branch. (PVC-per-PR is an option if warm caches matter; recommend ephemeral.)
 - **State that used to live in `/tmp/pr-monitor-state`** (last-checked time, dedupe, CI-notified
@@ -196,37 +197,36 @@ pull_request.closed / merged ─────► controller deletes Pod  ◄─�
 A single event — a reviewer leaving an inline comment — flows like this:
 
 ```
-GitHub        Gateway         Queue          Controller     Sidecar         tmux/Claude
-  │              │              │                 │             │                 │
-  │ pull_request_review_comment │                 │             │                 │
-  ├─────────────►│              │                 │             │                 │
-  │              │ verify HMAC  │                 │             │                 │
-  │              │ dedupe(delivery_id)            │             │                 │
-  │              ├─ enqueue ────►│ (key=repo#pr)  │             │                 │
-  │              │              │                 │             │                 │
-  │              │              │  PRSession for repo#pr exists? │                 │
-  │              │              │◄────────────────┤ (pod already up; PR is open)  │
-  │              │              │                 │             │                 │
-  │              │              │  consume(repo#pr)             │                 │
-  │              │              │◄────────────────────────────┤ (sidecar pulls) │
-  │              │              │                 │             │ wait for idle   │
-  │              │              │                 │             │ (.session_status│
-  │              │              │                 │             │   ends in Stop) │
-  │              │              │                 │             │ send_and_verify ├────►│
-  │              │              │                 │             │                 │ /pr:fix-comments
-  │              │              │                 │             │                 │ edit → /git:commit → push
-  │              │              │                 │             │ ack (eyes 👀)   │◄────┤
-  │              │              │◄ ack message ───┤ (on Stop)   │                 │
+GitHub        Operator (webhook + reconciler)   Queue        Sidecar        tmux/Claude
+  │              │                                 │            │                 │
+  │ pull_request_review_comment                    │            │                 │
+  ├─────────────►│ verify HMAC                     │            │                 │
+  │              │ dedupe(delivery_id)             │            │                 │
+  │              │ (content event → enqueue)       │            │                 │
+  │              ├─ enqueue ──────────────────────►│(key=repo#pr)                 │
+  │              │ reconciler: PRSession exists,    │            │                 │
+  │              │ pod already up (PR is open) — noop                             │
+  │              │                                 │ consume(repo#pr)             │
+  │              │                                 │◄──────────┤ (sidecar pulls) │
+  │              │                                 │            │ wait for idle   │
+  │              │                                 │            │ (.session_status│
+  │              │                                 │            │   ends in Stop) │
+  │              │                                 │            │ send_and_verify ├────►│
+  │              │                                 │            │                 │ /pr:fix-comments
+  │              │                                 │            │                 │ edit→/git:commit→push
+  │              │                                 │            │ ack (eyes 👀)   │◄────┤
+  │              │                                 │◄ ack ──────┤ (on Stop)       │
 ```
 
-For `pull_request.opened` the only difference is an extra first step: the controller **creates**
-the `PRSession`/pod, which boots the tmux session (`run.sh`) before the sidecar delivers the PR
-description as the seed message. For `pull_request.closed`/merged the controller **deletes** the
-`PRSession`, and Kubernetes garbage-collects the pod.
+For `pull_request.opened` the only difference is a first step: the webhook handler **creates** the
+`PRSession` CR, the reconciler boots the pod + tmux session (`run.sh`), then the description is
+delivered as the seed message. For `pull_request.closed`/merged the handler **deletes** the
+`PRSession` CR and the reconciler garbage-collects the pod. If a webhook is ever missed, the
+operator's periodic GitHub resync converges the same end state.
 
 ### 6.2 `PRSession` custom resource
 
-The controller reconciles one `PRSession` per open PR. It is the single source of truth for
+The operator reconciles one `PRSession` per open PR. It is the single source of truth for
 "which PRs have a live agent" — replacing the scattered, host-bound tmux sessions of today.
 
 ```yaml
@@ -285,45 +285,129 @@ Notes:
 
 ## 7. Security
 
-- **Webhook auth:** HMAC `X-Hub-Signature-256` verified at the gateway; reject otherwise.
-- **GitHub App over PAT:** the gateway mints short-lived, per-repo installation tokens and
+- **Webhook auth:** HMAC `X-Hub-Signature-256` verified by the operator's webhook server; reject otherwise.
+- **GitHub App over PAT:** the operator mints short-lived, per-repo installation tokens and
   projects them into pods as mounted secrets — instead of baking one long-lived token into every
-  container. Carries over the existing region check (`check-region.sh`) at the gateway tier.
-- **Network policy:** pods may egress only to GitHub + the queue; only the gateway is publicly
-  reachable (TLS via ingress).
+  container. Carries over the existing region check (`check-region.sh`) at the operator tier.
+- **Network policy:** agent pods may egress only to GitHub + the queue. The operator's webhook
+  Service is *not* exposed directly; it is reached only via the tunnel/ingress chosen in §8
+  (with `cloudflared`/`frpc`, exposure is an **outbound** connection from the tunnel pod — no
+  inbound hole in the cluster firewall at all).
 - **Blast radius:** `--dangerously-skip-permissions` stays, but now each PR runs in its own pod
   with k8s resource limits and network isolation — a strictly tighter sandbox than a shared host.
 
-## 8. Phased rollout
+## 8. Exposing the webhook endpoint (tunnels & ingress)
+
+GitHub webhooks are **outbound POSTs from GitHub to a public URL** — so the operator's webhook
+server must be reachable from the internet. Many target clusters (home labs, private/on-prem,
+behind NAT) have no public IP or ingress controller. Rather than require one, the chart supports
+**outbound reverse tunnels**: the tunnel client runs inside the cluster, dials *out* to a public
+edge, and gets back a stable public hostname that forwards to the operator Service. No inbound
+firewall hole, no public LoadBalancer needed.
+
+Two tunnel backends are supported, selectable (either, or both) via Helm values:
+
+| Backend | What it is | Public edge | Best when |
+|---------|------------|-------------|-----------|
+| **Cloudflare Tunnel** (`cloudflared`) | Cloudflare's tunnel daemon (set up via Cloudflare Zero Trust; commonly grouped with "WARP"). Note: WARP-the-client connects you *to* Cloudflare; the **Tunnel** is what *publishes* your Service. | Cloudflare (free named tunnel) | You use Cloudflare DNS / want managed TLS + a free public hostname |
+| **frpc** | `frp` reverse-proxy client → your own public `frps` server | Your own VPS running `frps` | You already run a public host and want full control |
+
+Both are just **Deployments the chart renders** (2 replicas for HA) that point at the operator's
+webhook Service; the operator itself is unchanged. If you *do* have a normal ingress/LoadBalancer,
+set `webhook.expose.mode: ingress` and skip both tunnels.
+
+### 8.1 Helm values
+
+```yaml
+webhook:
+  service:
+    port: 8080                       # operator webhook server port (tunnel target)
+  expose:
+    # ingress | cloudflare | frpc | both   (both = two public URLs for redundancy)
+    mode: cloudflare
+
+# --- Cloudflare Tunnel (cloudflared) -------------------------------------
+cloudflare:
+  enabled: true                      # auto-true when expose.mode is cloudflare/both
+  replicas: 2
+  # Recommended: token-based named tunnel created in the Zero Trust dashboard.
+  tunnelTokenSecret:
+    name: cloudflared-token          # kubectl create secret generic cloudflared-token --from-literal=token=...
+    key: token
+  ingress:                           # cloudflared route → operator Service
+    hostname: codemate-webhook.example.com
+    service: http://codemate-operator.codemate.svc.cluster.local:8080
+  # image: cloudflare/cloudflared:latest
+
+# --- frpc -----------------------------------------------------------------
+frpc:
+  enabled: false                     # auto-true when expose.mode is frpc/both
+  replicas: 2
+  server:
+    addr: frps.example.com           # your public frps host
+    port: 7000
+  authTokenSecret:                   # must match frps token
+    name: frpc-token
+    key: token
+  proxy:
+    name: codemate-webhook
+    type: https                      # https | http | tcp
+    customDomains: ["codemate-webhook.example.com"]
+    localSvc: codemate-operator.codemate.svc.cluster.local
+    localPort: 8080
+  # image: snowdreamtech/frpc:latest
+```
+
+### 8.2 How the value drives rendering
+
+- `expose.mode` is the single switch. `cloudflare`/`frpc` render exactly one tunnel Deployment +
+  its config (a `ConfigMap` for `cloudflared` `config.yaml` / `frpc.toml`, plus the token `Secret`
+  reference). `both` renders both; `ingress` renders a normal `Ingress` and no tunnel.
+- Tokens are **never** put in values — they're referenced from pre-created `Secret`s
+  (`tunnelTokenSecret` / `authTokenSecret`), consistent with §7.
+- **Both enabled** gives two public hostnames to the same operator Service. GitHub allows multiple
+  webhooks per repo, so you can register both URLs for failover, or just point GitHub at one and
+  keep the other warm. The HMAC secret (§7) is identical on both paths, so either is safe.
+- The webhook public URL (whichever backend) is what you paste into the GitHub App / repo webhook
+  config; the operator validates `X-Hub-Signature-256` regardless of how the request arrived.
+
+## 9. Phased rollout
 
 | Phase | Deliverable | Risk |
 |-------|-------------|------|
 | **0** | *(today)* cron polling + tmux in a single container | — |
-| **1** | Stand up the gateway; replace the in-container cron poll with a webhook-fed inbox sidecar that injects into the **existing tmux session** via `send_and_verify_command`. Prove event parity with `monitor-pr.sh`. | Low — reuses image, tmux path & skills |
-| **2** | Add the controller + `PRSession` CRD; auto-provision a pod on `pull_request.opened` and **tear it down on `pull_request.closed`/merged** (no more manual `codemate --pr`). | Medium |
-| **3** | Durable queue (Redis Streams/NATS) + GitHub App auth + per-repo session quotas. | Medium |
+| **1** | Stand up the operator with just its embedded webhook server; replace the in-container cron poll with a webhook-fed inbox sidecar that injects into the **existing tmux session** via `send_and_verify_command`. Prove event parity with `monitor-pr.sh`. | Low — reuses image, tmux path & skills |
+| **2** | Add the operator's reconciler + `PRSession` CRD; auto-provision a pod on `pull_request.opened` and **tear it down on `pull_request.closed`/merged** (no more manual `codemate --pr`). | Medium |
+| **3** | Durable queue (Redis Streams/NATS) + periodic GitHub resync backstop + GitHub App auth + per-repo session quotas. | Medium |
 | **4** | Multi-repo, web dashboard of active sessions, requirement-issue → auto-spawn. | — |
 
 The existing `dev:run-image` / `dev:manage-k8s` plugins are natural building blocks for Phase 2's
 pod provisioning and operational tooling.
 
-## 9. Open questions
+## 10. Open questions
 
 1. **Delivery transport:** direct HTTP to a per-pod sidecar vs. a shared durable queue.
    *Recommendation: queue* — durability and crash-redelivery outweigh the added component.
 2. **Workspace persistence:** ephemeral re-checkout vs. PVC-per-PR. *Recommendation: ephemeral.*
-3. **Operator implementation:** full CRD + controller-runtime/kopf vs. a plain service that just
-   manages Deployments by label. Start simple (Phase 1/2), formalize the CRD in Phase 3.
+3. **Operator implementation:** full CRD + controller-runtime/kopf (embedded webhook server) vs. a
+   plain service that just manages Deployments by label. Start simple (Phase 1/2), formalize the
+   CRD in Phase 3.
 4. **Concurrency within a PR:** strictly serial runs (proposed) vs. allowing a quick read-only run
    to interleave. Serial is safest for git; revisit if latency hurts.
 5. **Cost controls:** per-repo pod quotas / max concurrent sessions to bound spend.
+6. **Tunnel default:** ship `expose.mode` defaulting to `cloudflare` (lowest setup for most users)
+   vs. `ingress` (assume a real cluster). *Leaning `cloudflare`* given the home-lab target.
 
-## 10. Summary
+## 11. Summary
 
-Move the GitHub-watching logic *out* of every container and into a single **webhook gateway**
-(the middle layer), route events through a **durable per-PR queue**, and let a **Kubernetes
-operator** run **one persistent-tmux Claude pod per PR**, with the **pod's lifecycle bound to the
-PR's** (created on open, destroyed on close/merge). Webhook messages are injected into the live TUI
-via the existing `send_and_verify_command`, preserving conversation context across events. This
-removes the per-container 60s polling loop, scales to many concurrent PRs, and lets requirements be
-expressed naturally in PR/issue descriptions and comments.
+Move the GitHub-watching logic *out* of every container and into a single **Kubernetes operator**
+(the middle layer) that both **receives the GitHub webhook** (embedded HTTPS server) and **controls
+the pods** (reconciles `PRSession` CRs). Lifecycle events create/delete the CR; content events are
+routed through a **durable per-PR queue**. The operator runs **one persistent-tmux Claude pod per
+PR**, with the **pod's lifecycle bound to the PR's** (created on open, destroyed on close/merge),
+and a **periodic GitHub resync** self-heals any missed webhook. Webhook messages are injected into
+the live TUI via the existing `send_and_verify_command`, preserving conversation context across
+events. The webhook endpoint is exposed to GitHub via a Helm-selectable backend — **Cloudflare
+Tunnel (`cloudflared`)**, **frpc**, both, or a plain ingress — so even a private/home cluster with
+no public IP works out of the box. This removes the per-container 60s polling loop, scales to many
+concurrent PRs, and lets requirements be expressed naturally in PR/issue descriptions and comments.
