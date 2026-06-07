@@ -34,8 +34,12 @@ This is efficient for a single PR, but has structural limits:
 - **Event-driven, not polled.** React to GitHub webhooks instead of a per-container `gh` loop.
 - **Requirements live in GitHub.** PR description, PR review comments, and issue comments are
   the input channel — write the requirement in GitHub, the agent picks it up.
-- **No TUI.** The agent runs **headless** (review/act on code), not an interactive tmux session
-  we type into.
+- **Keep the persistent tmux session; no human in the loop.** Each pod still runs a long-lived
+  Claude `tmux` session, and webhook messages are injected into it via `tmux send-keys`
+  (`send_and_verify_command`) — exactly as today. The difference is *nobody attaches to discuss*;
+  the TUI is purely the runtime that receives injected webhook messages and reviews/acts on code.
+  A persistent session is deliberate: it preserves **conversation context across events** that a
+  one-shot `claude -p` / Agent SDK call would throw away.
 - **Kubernetes-native lifecycle.** Provision, isolate, resource-limit, and reap PR sessions as
   first-class cluster objects.
 
@@ -75,8 +79,12 @@ This is efficient for a single PR, but has structural limits:
    ┌────────────┐  ┌────────────┐                  ┌────────────┐
    │ Pod: PR #1 │  │ Pod: PR #2 │      ...         │ Pod: PR #N │
    │ ┌────────┐ │  │            │                  │            │
-   │ │ runner │ │  drain queue → run `claude -p "<prompt>"` (headless)
-   │ │ (loop) │ │  serialize per PR → commit/push via /git:commit
+   │ │sidecar │ │  drain queue → wait for idle (/tmp/.session_status)
+   │ │ (loop) │ │  → tmux send-keys (send_and_verify_command)
+   │ └───┬────┘ │  │            │                  │            │
+   │ ┌───▼────┐ │  persistent Claude `tmux` session reviews code,
+   │ │ tmux   │ │  commits/pushes via /git:commit
+   │ │ Claude │ │  │            │                  │            │
    │ └────────┘ │  │            │                  │            │
    │ git checkout of PR branch (isolated workspace) │            │
    └────────────┘  └────────────┘                  └────────────┘
@@ -89,37 +97,54 @@ This is efficient for a single PR, but has structural limits:
 - Normalizes each GitHub event into an internal `PRTask` `{repo, pr, kind, payload, delivery_id}`.
 - Dedupes on GitHub `X-GitHub-Delivery` id; enqueues keyed by `repo#pr` so a PR's events stay ordered.
 - Stateless and horizontally scalable.
+- It is the *source* of messages (replacing the in-container `gh` poll); delivery into the
+  session still happens via `tmux send-keys` inside the pod (see §4).
 
 **B. Message Queue / Inbox** — durable buffer (Redis Streams or NATS JetStream):
 - Per-PR ordering and at-least-once delivery; survives pod restarts (fixes pain #5).
 - Lets the controller scale a pod to zero and replay buffered events when it comes back.
 
 **C. Session Controller (operator)** — reconciles a `PRSession` custom resource:
-- For each PR with pending tasks, ensure exactly one pod exists (one-PR-per-pod, kept on purpose).
-- Applies resource limits, network policy, and **idle reaping** (scale-to-zero after N idle minutes).
-- Tears down on `pull_request.closed`/merged.
+- **Pod lifetime == PR lifetime.** Create exactly one pod when a PR opens (or on its first event);
+  keep it running for the entire open lifetime; **shut it down when the PR is closed/merged**.
+- One-PR-per-pod, kept on purpose; applies resource limits and network policy.
+- No idle scale-to-zero: the persistent tmux session holds in-memory conversation context, so
+  reaping it mid-PR would discard that context. The PR's open/closed state *is* the lifecycle
+  signal (see §6).
 
-**D. Per-PR Agent Pod** — the existing CodeMate image, minus cron and minus tmux:
-- A lightweight **runner loop** consumes the PR's queue and, per message, executes a **headless**
-  Claude run: `claude -p "<prompt>" --dangerously-skip-permissions --append-system-prompt ...`.
-- Runs are **serialized per PR** (one at a time) so git operations never race within a checkout.
+**D. Per-PR Agent Pod** — the existing CodeMate image, **minus cron but keeping tmux**:
+- The pod runs the same long-lived Claude `tmux` session as today (`run.sh`).
+- A lightweight **delivery sidecar** consumes the PR's queue and, per message, waits for the
+  session to be idle, then injects the message into the TUI via `tmux send-keys` using the
+  existing `send_and_verify_command`.
+- Messages are **serialized per PR** (one at a time, in order) so git operations never race.
 - Reuses existing skills end-to-end: `/pr:fix-comments`, `/pr:update`, `/git:commit`, `/pr:ack-comments`.
 
-## 4. Headless execution (no TUI)
+## 4. Message delivery into the persistent TUI session
 
-This is the key simplification from the original sketch. We **do not** keep an interactive tmux
-session and type into it. Each task is a one-shot headless invocation:
+We **keep** the persistent tmux Claude session and the proven keystroke-injection path. The only
+things that change are the *source* and the *trigger* of messages — not how they reach Claude.
 
-| Today (TUI) | Proposed (headless) |
-|-------------|---------------------|
-| Persistent `tmux` session | Per-task `claude -p` process (or Agent SDK call) |
-| `send_and_verify_command` (`send-keys` + `Enter` workaround) | Pass the prompt as an argument — no keystroke injection |
-| `/tmp/.session_status` polling to know when idle | Process exit = task done; runner pulls the next message |
-| `check_git_changes` Stop-hook nudges a commit | Runner ends each task with `/git:commit`; commit is part of the run |
+| Concern | Today | Proposed |
+|---------|-------|----------|
+| **Source of events** | In-container `gh` poll (`monitor-pr.sh`) | Webhook gateway → per-PR queue |
+| **Trigger** | cron, every 60s | webhook arrival (push, near-instant) |
+| **Idle gating** | `/tmp/.session_status` ends in `Stop` | unchanged — sidecar waits for `Stop` |
+| **Delivery into Claude** | `send_and_verify_command` (`tmux send-keys` + `Enter`) | unchanged — same function |
+| **Commit nudge** | `check_git_changes` Stop hook | unchanged |
+| **Dedupe / ordering state** | `/tmp/pr-monitor-state` (host-bound) | queue / Redis / `PRSession.status` (durable) |
 
-**Eliminated:** the tmux send-keys layer, the extended-keys `Enter` encoding hack, the
-status-file verify/retry loop, and the "only act when Stopped" cron gating. The queue + serialized
-runner give the same "one message at a time, in order" semantics far more robustly.
+Why keep the TUI session rather than going headless (`claude -p` / Agent SDK):
+
+- **Persistent context.** A single long-lived session accumulates the conversation across many
+  webhook events (description → review comment → CI failure → follow-up). One-shot headless runs
+  would lose that context every event and have to re-establish it.
+- **Zero rewrite of the proven path.** `send_and_verify_command`, the `/tmp/.session_status` idle
+  signal, and the `check_git_changes` Stop hook all carry over unchanged — we are only swapping the
+  cron poller for a webhook-fed queue in front of them.
+
+So the sidecar's loop is essentially today's `monitor-pr.sh` "act only when Stopped, send one
+message, verify submission" logic — but woken by a queue message instead of a 60s cron tick.
 
 ## 5. Event → action mapping
 
@@ -141,12 +166,27 @@ kick off work that *creates* a PR, not just react to an existing one.
 
 ## 6. Lifecycle, state & isolation
 
+**A pod's lifecycle is bound 1:1 to its PR's lifecycle:**
+
+```
+pull_request.opened ─────► controller creates Pod (PRSession) ─────► persistent
+                                                                      tmux session
+   review comments / issue comments / CI events  ──► injected into the live session
+                                                                          │
+pull_request.closed / merged ─────► controller deletes Pod  ◄────────────┘
+```
+
+- The pod starts when the PR opens and runs continuously while the PR is open, so its tmux session
+  keeps full conversation context across every webhook event.
+- When the PR is **closed or merged**, the controller tears the pod down (and frees its resources).
+  A reopen recreates a fresh pod.
 - **Mapping:** `PRSession` CRD keyed by `repo + pr`; pods labeled `codemate.io/repo`,
   `codemate.io/pr`. The gateway/controller find a session by label, never by host.
-- **Workspace:** ephemeral by default — git is the source of truth, so a re-provisioned pod just
+- **Workspace:** ephemeral — git is the source of truth, so a *crash-restarted* pod just
   re-checks-out the PR branch. (PVC-per-PR is an option if warm caches matter; recommend ephemeral.)
 - **State that used to live in `/tmp/pr-monitor-state`** (last-checked time, dedupe, CI-notified
-  flags) moves to the queue/Redis or `PRSession.status` — durable and centrally visible.
+  flags) moves to the queue/Redis or `PRSession.status` — durable and centrally visible. In-session
+  conversation context is intentionally *not* persisted; it lives only for the pod's (== PR's) life.
 - **One PR per pod** is retained on purpose: isolated git checkout, independent crash blast radius,
   per-PR CPU/mem limits, trivial routing. Scaling = more pods, scheduled by k8s.
 
@@ -167,8 +207,8 @@ kick off work that *creates* a PR, not just react to an existing one.
 |-------|-------------|------|
 | **0** | *(today)* cron polling + tmux in a single container | — |
 | **1** | Stand up the gateway; convert the agent to **headless** runs driven by an HTTP inbox; disable cron. Prove event parity with `monitor-pr.sh`. | Low — reuses image & skills |
-| **2** | Add the controller + `PRSession` CRD; auto-provision pods on `pull_request.opened` (no more manual `codemate --pr`). | Medium |
-| **3** | Durable queue (Redis Streams/NATS) + idle reaping/scale-to-zero + GitHub App auth. | Medium |
+| **2** | Add the controller + `PRSession` CRD; auto-provision a pod on `pull_request.opened` and **tear it down on `pull_request.closed`/merged** (no more manual `codemate --pr`). | Medium |
+| **3** | Durable queue (Redis Streams/NATS) + GitHub App auth + per-repo session quotas. | Medium |
 | **4** | Multi-repo, web dashboard of active sessions, requirement-issue → auto-spawn. | — |
 
 The existing `dev:run-image` / `dev:manage-k8s` plugins are natural building blocks for Phase 2's
@@ -189,6 +229,8 @@ pod provisioning and operational tooling.
 
 Move the GitHub-watching logic *out* of every container and into a single **webhook gateway**
 (the middle layer), route events through a **durable per-PR queue**, and let a **Kubernetes
-operator** run **one headless Claude pod per PR**. This removes the per-container polling loop and
-the fragile TUI keystroke injection, scales to many concurrent PRs, and lets requirements be
+operator** run **one persistent-tmux Claude pod per PR**, with the **pod's lifecycle bound to the
+PR's** (created on open, destroyed on close/merge). Webhook messages are injected into the live TUI
+via the existing `send_and_verify_command`, preserving conversation context across events. This
+removes the per-container 60s polling loop, scales to many concurrent PRs, and lets requirements be
 expressed naturally in PR/issue descriptions and comments.
