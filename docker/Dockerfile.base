@@ -1,7 +1,7 @@
-# Base image for CodeMate - Ubuntu 25.10 (Questing)
+# Base image for CodeMate - Ubuntu 26.04 LTS (Resolute Wombat)
 # This image contains system packages, development tools, and dependencies
 # Built weekly to keep packages up-to-date
-ARG BASE_IMAGE=ubuntu:questing
+ARG BASE_IMAGE=ubuntu:26.04
 FROM ${BASE_IMAGE}
 
 # Environment variables
