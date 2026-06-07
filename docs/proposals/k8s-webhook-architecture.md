@@ -147,9 +147,41 @@ Why keep the TUI session rather than going headless (`claude -p` / Agent SDK):
 - **Zero rewrite of the proven path.** `send_and_verify_command`, the `/tmp/.session_status` idle
   signal, and the `check_git_changes` Stop hook all carry over unchanged — we are only swapping the
   cron poller for a webhook-fed queue in front of them.
+- **Human override / interactive access.** Because it's a real tmux session, a maintainer can
+  `kubectl exec` into the pod and `tmux attach` to talk to Claude *directly* from any machine with
+  cluster access — impossible with a one-shot headless run (§4.1).
 
 So the sidecar's loop is essentially today's `monitor-pr.sh` "act only when Stopped, send one
 message, verify submission" logic — but woken by a queue message instead of a 60s cron tick.
+
+### 4.1 Human access via `kubectl` + `tmux attach`
+
+The persistent session doubles as a **direct interactive channel**. From any machine that can reach
+the cluster, a maintainer attaches to the live Claude session:
+
+```bash
+# resolve the pod by PRSession label and attach to the tmux session
+kubectl exec -it -n codemate \
+  "$(kubectl get pod -n codemate -l codemate.io/pr=241 -o name)" \
+  -- tmux attach -t claude-code
+```
+
+A thin convenience wrapper (`codemate attach --pr 241`) does the label lookup + exec. This is the
+same `claude-code` session the sidecar feeds, so a human and the webhook path drive *one* Claude.
+Two coordination points:
+
+- **Two writers, one pane.** The sidecar and a human both `send-keys`/type into the same session.
+  To avoid interleaved input, the sidecar treats *"a client is attached"* as busy: before delivering
+  it checks `tmux list-clients -t claude-code` and **defers queued messages while a human is
+  attached** (the queue holds them; they drain on detach). The human always has priority.
+- **Waking a scaled-to-zero pod.** If the pod was reaped for idleness (§6.3), there's nothing to
+  attach to. `codemate attach` first asks the operator to scale the `PRSession` up (annotation /
+  `kubectl scale`), waits for ready (the Claude session **resumes** from the PVC), then attaches.
+
+**Access control:** this path is governed entirely by **Kubernetes RBAC** — `exec`/`attach`
+permission in the `codemate` namespace. It is an operator/maintainer channel and deliberately
+bypasses the GitHub author checks (which gate *untrusted* webhook input, deferred per §7); cluster
+access is already a trusted boundary.
 
 ## 5. Event → action mapping
 

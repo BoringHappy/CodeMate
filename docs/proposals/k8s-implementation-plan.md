@@ -103,6 +103,9 @@ CodeMate/
   - buffers messages FIFO,
   - waits until `/tmp/.session_status` ends in `Stop` (reuse the existing idle signal),
   - injects via `send_and_verify_command` (lifted from `common.sh`).
+- [ ] **Human-attach coordination (§4.1):** before delivering, check `tmux list-clients -t
+      claude-code`; if a maintainer is attached, treat the session as busy and **hold** queued
+      messages until they detach (human has priority over the webhook path).
 - [ ] **Remove cron**: delete the crontab entry and `monitor-pr.sh` invocation from
       `docker/setup/setup.sh` / image; port its formatting logic into the operator's event mapper.
 - [ ] Keep `run.sh`, the workspace hooks, and all skills untouched.
@@ -213,10 +216,19 @@ CodeMate/
 - [ ] Minimal web view (or `kubectl`/k9s plugin) listing `PRSession`s + status.
 - [ ] Slack/Lark notifications reuse `plugins/workspace/hooks/send_to_*.sh`.
 
-### 4.4 Acceptance criteria
+### 4.4 Interactive attach helper (§4.1)
+- [ ] `codemate attach --pr <n>` (and `--repo`): resolves the pod by `codemate.io/pr` label and runs
+      `kubectl exec -it ... -- tmux attach -t claude-code`.
+- [ ] **Wake-on-attach:** if the `PRSession` is scaled to zero, the helper asks the operator to scale
+      it up (annotation / `kubectl scale`), waits for Ready (session resumes from PVC), then attaches.
+- [ ] Document the RBAC needed (`pods/exec` in the `codemate` namespace) for this maintainer channel.
+
+### 4.5 Acceptance criteria
 - Filing an issue with the trigger label produces a draft PR and a running session end-to-end.
 - A cluster with **no public IP** receives GitHub webhooks through `cloudflared` and/or `frpc`.
 - Active sessions are visible at a glance.
+- `codemate attach --pr <n>` from a remote machine drops into the live Claude session; webhook
+  messages are held while attached and drain after detach.
 
 ---
 
