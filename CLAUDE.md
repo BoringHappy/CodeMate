@@ -36,7 +36,8 @@ Parameters:
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
-5. `setup/run.sh` launches Claude Code with system prompt from `setup/prompt/system_prompt.txt`
+5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
+6. `setup/run.sh` launches Claude Code with system prompt from `setup/prompt/system_prompt.txt`
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 
