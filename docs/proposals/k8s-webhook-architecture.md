@@ -161,10 +161,66 @@ The operator's webhook handler replaces every check currently in `monitor-pr.sh`
 | `pull_request.ready_for_review` | Run `/pr:update` to refresh title/description |
 | `check_suite.completed` / `check_run.completed` (failure) | Fetch failing logs, run a fix, `/git:commit` |
 | `pull_request.closed` / merged | Operator deletes the `PRSession` → reconciler reaps the pod |
-| `issues.opened` / `issue_comment` (requirement issues) | Optionally spawn a "spec" session before a PR exists |
+| `issues.labeled` / `issue_comment` (trigger) | **Bootstrap**: create branch + empty commit + draft PR, then start the session — see §5.1 |
 
-Note the last row: because requirements can be written in **issue** comments too, the operator can
-kick off work that *creates* a PR, not just react to an existing one.
+### 5.1 Entry point: issue-driven bootstrap (creating the "empty" PR)
+
+In practice a user starts from an **issue**, not a PR. GitHub's web UI lets anyone file an issue,
+but you **cannot open an empty PR** there — a PR needs a head branch with at least one commit ahead
+of base (the API rejects an identical head/base with *"nothing to compare"*). So when an issue
+signals it wants an agent, the operator bootstraps the PR on the user's behalf.
+
+**Trigger (configurable — pick one):**
+- a **label** on the issue (e.g. `codemate` / `agent`), or
+- a **slash command** in the issue body or a comment (e.g. `/codemate start`), or
+- a dedicated **issue template** for agent tasks.
+
+**On trigger, the operator (using a GitHub App token) does:**
+1. Create a branch off the default branch: `codemate/issue-<n>-<slug>`.
+2. Push an **empty commit** so the branch is ahead of base — this is the minimal diff that makes a
+   PR openable:
+   ```bash
+   git commit --allow-empty -m "chore: start CodeMate session for #<n>"
+   ```
+3. Open a **draft PR** (`head=codemate/issue-<n>-<slug>`, `base=<default>`), body seeded from the
+   issue: `Closes #<n>` plus the requirements/**rules** the user wrote.
+4. The resulting `pull_request.opened` event then drives the normal flow (§5/§6): the operator
+   creates the `PRSession`, the pod boots, and the **issue body + rules become the seed message**
+   to Claude. The agent's first real work replaces the empty commit.
+
+```
+user files Issue (+ label/command, writes rules)
+        │  issues.labeled / issue_comment webhook
+        ▼
+operator: create branch → empty commit → open draft PR (Closes #n, body = issue rules)
+        │  pull_request.opened webhook (now a normal PR exists)
+        ▼
+operator: create PRSession → pod boots tmux → seed = issue requirements
+        │
+        ▼
+normal PR loop (review comments, CI, issue/PR comments → the live session)
+```
+
+Optionally the bootstrap reuses the existing **issue plugin** — `/issue:read-issue` to pull full
+context (including comments) and `/issue:refine-issue` / `/issue:triage-issue` to clean up the
+request before seeding, so Claude starts from a well-formed spec.
+
+**Issue ↔ PR relationship.** A consequence of this entry point: every *agent-bootstrapped* PR is
+tied **1:1 to an issue** via `Closes #<n>`. This is a feature — every change traces back to a
+tracked requirement, the issue is the durable discussion thread, and merging the PR auto-closes the
+issue. The mapping is one issue → one branch → one PR → one pod.
+
+This does **not** force *all* PRs to originate from an issue, though:
+
+| How the PR is born | Issue required? | Operator behavior |
+|--------------------|-----------------|-------------------|
+| Web UI (the common case) | **Yes** — file an issue; operator bootstraps the empty PR | issue → empty commit → draft PR → session |
+| CLI / IDE / `git push` + open PR | No — a human already has a branch with commits | operator just attaches a session on `pull_request.opened` |
+
+So: the **issue is the mandatory entry point only for the web UI** (because empty PRs can't be
+created there). Directly-opened PRs are still picked up. If you *want* to enforce "every PR has an
+issue" as a policy, that becomes a simple operator rule (reject/relabel PRs with no linked issue) —
+called out as open question #7.
 
 ## 6. Lifecycle, state & isolation
 
@@ -397,6 +453,9 @@ pod provisioning and operational tooling.
 5. **Cost controls:** per-repo pod quotas / max concurrent sessions to bound spend.
 6. **Tunnel default:** ship `expose.mode` defaulting to `cloudflare` (lowest setup for most users)
    vs. `ingress` (assume a real cluster). *Leaning `cloudflare`* given the home-lab target.
+7. **Mandatory issue linkage:** enforce "every PR must close an issue" (clean traceability, single
+   model) vs. allow issue-less direct PRs. *Leaning: bootstrap-from-issue is the default/recommended
+   path, but don't hard-reject direct PRs unless a repo opts in.*
 
 ## 11. Summary
 
