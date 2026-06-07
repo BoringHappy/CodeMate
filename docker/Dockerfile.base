@@ -52,6 +52,7 @@ RUN set -euxo pipefail \
         man-db \
         nodejs \
         pkg-config \
+        pre-commit \
         procps \
         psmisc \
         python3 \
