@@ -245,17 +245,45 @@ tied **1:1 to an issue** via `Closes #<n>`. This is a feature — every change t
 tracked requirement, the issue is the durable discussion thread, and merging the PR auto-closes the
 issue. The mapping is one issue → one branch → one PR → one pod.
 
-This does **not** force *all* PRs to originate from an issue, though:
+This does **not** force *all* PRs to originate from an issue, though — there are **three** entry
+points:
 
 | How the PR is born | Issue required? | Operator behavior |
 |--------------------|-----------------|-------------------|
 | Web UI (the common case) | **Yes** — file an issue; operator bootstraps the empty PR | issue → empty commit → draft PR → session |
 | CLI / IDE / `git push` + open PR | No — a human already has a branch with commits | operator just attaches a session on `pull_request.opened` |
+| **`codemate` CLI (cluster mode)** | No — start a session directly | CLI creates a `PRSession`; the pod creates the branch+PR itself, then works — see §5.2 |
 
 So: the **issue is the mandatory entry point only for the web UI** (because empty PRs can't be
 created there). Directly-opened PRs are still picked up. If you *want* to enforce "every PR has an
 issue" as a policy, that becomes a simple operator rule (reject/relabel PRs with no linked issue) —
 called out as open question #7.
+
+### 5.2 Entry point: `codemate` CLI (start a PR session directly)
+
+This preserves today's UX — `codemate --branch feature/x` / `--pr 123` — but targets the **cluster**
+instead of a local Docker container. It's the same idea as the current tool (spin up an agent that
+creates and works a PR), just hosted, persistent, and managed by the operator. **No issue needed.**
+
+```
+codemate --branch feature/x  [--repo ...] [--query "build X"]
+        │  creates a PRSession CR in the cluster (instead of `docker run` locally)
+        ▼
+operator reconciler: provision pod → run.sh → setup-repo.py creates branch + PR (today's logic)
+        │  pull_request.opened (operator now tracks it like any PR)
+        ▼
+normal PR loop (webhook events + `codemate attach --pr` → the live session)
+```
+
+- The pod **creates the PR itself** by reusing the existing `setup-repo.py` flow (which already
+  clones, checks out a branch/PR, and opens a PR from the template) — so no empty-commit trick is
+  needed; the agent's first real work is the first commit.
+- Once the PR exists, it's an ordinary `PRSession`: webhook events drive it, it scales to zero when
+  idle, and `codemate attach --pr` (§4.1) connects to it.
+- Net effect: `codemate` keeps working the way users already know, but a launched session now lives
+  in the cluster — long-running, reachable from anywhere, and webhook-fed — rather than tied to the
+  laptop that started it. (Local `docker run` mode stays available for dev; see the implementation
+  plan's back-compat note.)
 
 ## 6. Lifecycle, state & isolation
 

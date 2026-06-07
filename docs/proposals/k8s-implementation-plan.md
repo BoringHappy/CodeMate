@@ -33,6 +33,7 @@ acceptance criteria. Each phase is independently shippable and leaves the system
 | Tmux launch + injection | **Reuse** | `docker/setup/run.sh`, `common.sh::send_and_verify_command` |
 | Idle/commit hooks | **Reuse** | `plugins/workspace/hooks/*` |
 | Repo/branch/PR bootstrap | **Reuse/extend** | `docker/setup/python/setup-repo.py` |
+| `codemate` launcher (cluster mode → create `PRSession`) | **Modify** | `codemate` (keeps local `docker run` as back-compat) |
 | Helm chart | **New** | — |
 | Tunnels (cloudflared / frpc) | **New** (chart templates) | — |
 
@@ -153,8 +154,18 @@ CodeMate/
 - [ ] Modify `run.sh` to start with `claude --resume <claudeSessionId>` when one exists, else cold.
 - [ ] On PR close/merge, delete the PR's session blob alongside the pod.
 
-### 2.6 Acceptance criteria
+### 2.6 `codemate` CLI cluster mode (proposal §5.2)
+- [ ] Add a cluster-backed mode to the `codemate` launcher: instead of `docker run` locally, create a
+      `PRSession` CR (via `kubectl`/operator API) from `--branch`/`--pr`/`--repo`/`--query`.
+- [ ] The pod creates the PR itself by **reusing `setup-repo.py`** (already clones + checks out
+      branch/PR + opens a PR from the template) — no empty-commit trick needed; no issue required.
+- [ ] Keep the existing **local `docker run`** path as the dev/back-compat mode (flag or auto-detect
+      cluster context). Seed `--query` becomes the session's first message.
+
+### 2.7 Acceptance criteria
 - Opening a PR auto-creates a pod that picks up the PR description as the seed message.
+- `codemate --branch x` (cluster mode) creates a `PRSession`, the pod opens a PR, and work begins —
+  no issue involved; the result is an ordinary `PRSession` (webhook-driven, attachable).
 - A fresh PR pod authenticates Claude purely from the shared PVC — no per-pod login.
 - Closing/merging deletes the pod (and session blob) within one reconcile.
 - `kubectl get prsessions` lists every active agent across repos.
