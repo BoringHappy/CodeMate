@@ -65,6 +65,22 @@ claude --plugin-dir /path/to/pr
 - Git repository with remote access
 - Active pull request (for most skills)
 
+## GitHub CLI Notes
+
+Bare `gh pr view` / `gh pr list` (without `--json`) fail because GitHub is deprecating Projects (classic) and the default selection set still requests `repository.pullRequest.projectCards`:
+
+```
+GraphQL: Projects (classic) is being deprecated ... (repository.pullRequest.projectCards)
+```
+
+All skills in this plugin pass `--json` with explicit fields to skip the deprecated selection. Keep this pattern when adding new commands:
+
+```bash
+gh pr view <number> --json number,title,body,headRefName,baseRefName,state,url,files
+gh pr list --json number,title,headRefName,state,url
+gh pr diff <number>   # unaffected — no --json needed
+```
+
 ## Plugin Structure
 
 ```
@@ -82,4 +98,4 @@ pr/
 
 ## Version
 
-1.0.0
+1.0.2

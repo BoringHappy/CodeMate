@@ -56,3 +56,19 @@ PR comments:
 7. **PR Comments** - Summary of general comments (if any)
 
 Format the output clearly using markdown so the user can see the PR details at a glance. This summary should always be visible in your response to the user.
+
+## GitHub CLI Notes
+
+Bare `gh pr view` / `gh pr list` (without `--json`) fail in this environment. GitHub is deprecating Projects (classic), and the default selection set still requests `repository.pullRequest.projectCards`:
+
+```
+GraphQL: Projects (classic) is being deprecated ... (repository.pullRequest.projectCards)
+```
+
+**Always pass `--json` with explicit fields** to skip the deprecated selection. Every `gh pr view` call in this skill already does this — preserve that when adding or editing commands. Reference:
+
+```bash
+gh pr view <number> --json number,title,body,headRefName,baseRefName,state,url,files
+gh pr list --json number,title,headRefName,state,url
+gh pr diff <number>   # unaffected — no --json needed
+```
