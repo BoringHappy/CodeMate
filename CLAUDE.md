@@ -32,7 +32,7 @@ Parameters:
 
 ### Container Startup Flow
 
-1. `setup/setup.sh` orchestrates initialization, running `setup/shell/check-region.sh` against `http://ip-api.com/json/` first; on mismatch with `CODEMATE_ALLOW_COUNTRY` it files a GitHub issue and exits before any other setup runs
+1. `setup/setup.sh` orchestrates initialization, running `setup/shell/check-region.sh` first; it detects the public IP from `https://ifconfig.me/ip` and the country/region from `http://ip-api.com/json/`. The check passes if the detected IP matches `CODEMATE_ALLOW_IP` **or** the detected country matches `CODEMATE_ALLOW_COUNTRY`. If neither matches it files a GitHub issue and exits before any other setup runs
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
@@ -43,7 +43,10 @@ Note: All setup scripts live under `docker/setup/` in the repository, but are co
 
 ### Required Environment Variables
 
-- `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`). The launcher refuses to start the container without it, and the container enforces the check at startup.
+- `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`).
+- `CODEMATE_ALLOW_IP` — comma-separated exact IPs or IPv4 CIDR ranges (e.g. `203.0.113.7,198.51.100.0/24`).
+
+At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set — the launcher refuses to start the container otherwise. The container enforces the check at startup and passes if **either** the detected IP or country is allowlisted.
 
 ### Plugin Marketplace
 

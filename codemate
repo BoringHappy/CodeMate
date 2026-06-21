@@ -89,10 +89,16 @@ create_env_file() {
 $(if [ -n "$anthropic_token" ]; then echo "ANTHROPIC_AUTH_TOKEN=$anthropic_token"; else echo "# ANTHROPIC_AUTH_TOKEN="; fi)
 $(if [ -n "$anthropic_url" ]; then echo "ANTHROPIC_BASE_URL=$anthropic_url"; else echo "# ANTHROPIC_BASE_URL="; fi)
 
-# Required: Comma-separated list of ip-api.com 'countryCode' values the
-# container is allowed to run in. The container queries http://ip-api.com/json/
-# before starting Claude and exits on mismatch. Example: CODEMATE_ALLOW_COUNTRY=US,CA
+# Access control: the container queries http://ip-api.com/json/ before starting
+# Claude and exits unless its IP or country is allowlisted. Set at least one of
+# the two variables below; the check passes if EITHER matches.
+#
+#   CODEMATE_ALLOW_COUNTRY - comma-separated ip-api.com 'countryCode' values.
+#                            Example: CODEMATE_ALLOW_COUNTRY=US,CA
+#   CODEMATE_ALLOW_IP      - comma-separated exact IPs or IPv4 CIDR ranges.
+#                            Example: CODEMATE_ALLOW_IP=203.0.113.7,198.51.100.0/24
 CODEMATE_ALLOW_COUNTRY=
+CODEMATE_ALLOW_IP=
 EOF
     print_success "Created $env_file"
 }
@@ -337,15 +343,16 @@ run_codemate() {
         echo "Create one with: codemate --setup"
     fi
 
-    # Require CODEMATE_ALLOW_COUNTRY so the container can enforce its country check
-    if [ -z "${CODEMATE_ALLOW_COUNTRY:-}" ]; then
-        print_error "CODEMATE_ALLOW_COUNTRY is not set"
+    # Require at least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP so the
+    # container can enforce its access check (it passes if either one matches).
+    if [ -z "${CODEMATE_ALLOW_COUNTRY:-}" ] && [ -z "${CODEMATE_ALLOW_IP:-}" ]; then
+        print_error "Neither CODEMATE_ALLOW_COUNTRY nor CODEMATE_ALLOW_IP is set"
         echo ""
-        echo "CodeMate refuses to start without an allowed country. Set the ip-api.com 'countryCode'"
-        echo "value(s) you want to permit (comma-separated for multiple) in your .env file, e.g.:"
+        echo "CodeMate refuses to start without an allowlist. Set at least one of the following"
+        echo "(comma-separated for multiple values) in your .env file, e.g.:"
         echo ""
-        printf "  ${BLUE}CODEMATE_ALLOW_COUNTRY=US${NC}\n"
         printf "  ${BLUE}CODEMATE_ALLOW_COUNTRY=US,CA,GB${NC}\n"
+        printf "  ${BLUE}CODEMATE_ALLOW_IP=203.0.113.7,198.51.100.0/24${NC}\n"
         echo ""
         exit 1
     fi
@@ -465,6 +472,7 @@ run_codemate() {
         -e "NO_PR=$NO_PR"
         -e "CODEMATE_GITHUB_TOKEN=$CODEMATE_GITHUB_TOKEN"
         -e "CODEMATE_ALLOW_COUNTRY=$CODEMATE_ALLOW_COUNTRY"
+        -e "CODEMATE_ALLOW_IP=$CODEMATE_ALLOW_IP"
         -e "GIT_USER_NAME=$GIT_USER_NAME"
         -e "GIT_USER_EMAIL=$GIT_USER_EMAIL"
         -e "TMPDIR=/home/agent/.claude/tmp"
@@ -516,9 +524,14 @@ Environment Variables:
   GIT_USER_NAME        Git commit author name
   GIT_USER_EMAIL       Git commit author email
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
-  CODEMATE_ALLOW_COUNTRY  Required. Comma-separated list of ip-api.com 'countryCode' values the container
-                       is allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
-                       before starting Claude; on mismatch it files a GitHub issue and exits.
+  CODEMATE_ALLOW_COUNTRY  Comma-separated list of ip-api.com 'countryCode' values the container is
+                       allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
+                       before starting Claude; if neither the IP nor country is allowlisted it files a
+                       GitHub issue and exits. At least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP
+                       is required.
+  CODEMATE_ALLOW_IP    Comma-separated list of exact IPs or IPv4 CIDR ranges the container is allowed
+                       to run from (e.g. 203.0.113.7,198.51.100.0/24). The access check passes if EITHER
+                       this or CODEMATE_ALLOW_COUNTRY matches. At least one of the two is required.
   DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
   CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.kube:/home/agent/.kube $HOME/.aws:/home/agent/.aws")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops

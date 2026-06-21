@@ -4,61 +4,151 @@ set -e
 source "$(dirname "$0")/common.sh"
 
 ALLOW_COUNTRY="${CODEMATE_ALLOW_COUNTRY:-}"
+ALLOW_IP="${CODEMATE_ALLOW_IP:-}"
 
-if [ -z "$ALLOW_COUNTRY" ]; then
-    printf "${RED}CODEMATE_ALLOW_COUNTRY is not set. Refusing to start.${RESET}\n"
-    printf "${RED}Set CODEMATE_ALLOW_COUNTRY (comma-separated list of allowed ip-api.com 'countryCode' values, e.g. US,CA) in your .env.${RESET}\n"
+if [ -z "$ALLOW_COUNTRY" ] && [ -z "$ALLOW_IP" ]; then
+    printf "${RED}Neither CODEMATE_ALLOW_COUNTRY nor CODEMATE_ALLOW_IP is set. Refusing to start.${RESET}\n"
+    printf "${RED}Set at least one of:${RESET}\n"
+    printf "${RED}  - CODEMATE_ALLOW_COUNTRY (comma-separated ip-api.com 'countryCode' values, e.g. US,CA)${RESET}\n"
+    printf "${RED}  - CODEMATE_ALLOW_IP (comma-separated IPs or IPv4 CIDR ranges, e.g. 203.0.113.7,198.51.100.0/24)${RESET}\n"
     exit 1
 fi
 
-printf "${CYAN}Checking country code against CODEMATE_ALLOW_COUNTRY=${ALLOW_COUNTRY}...${RESET}\n"
+# Convert a dotted-quad IPv4 address to its 32-bit integer value.
+# Echoes nothing for non-IPv4 input.
+ipv4_to_int() {
+    local ip="$1"
+    local IFS='.'
+    read -ra octets <<< "$ip"
+    [ "${#octets[@]}" -eq 4 ] || return 1
+    local result=0
+    for octet in "${octets[@]}"; do
+        case "$octet" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        [ "$octet" -le 255 ] || return 1
+        result=$(( (result << 8) + octet ))
+    done
+    echo "$result"
+}
 
-RESPONSE=$(curl -fsS --max-time 10 http://ip-api.com/json/ || true)
-if [ -z "$RESPONSE" ]; then
-    printf "${RED}Failed to fetch region info from http://ip-api.com/json/${RESET}\n"
-    exit 1
-fi
+# Return 0 if $1 (an IP) matches $2 (an exact IP or IPv4 CIDR like 10.0.0.0/8).
+ip_matches_entry() {
+    local ip="$1"
+    local entry="$2"
 
-CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty')
-CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty')
-CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty')
-CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty')
-
-if [ -z "$CURRENT_COUNTRY_CODE" ]; then
-    printf "${RED}Could not parse 'countryCode' from ip-api.com response.${RESET}\n"
-    printf "${RED}Response: ${RESPONSE}${RESET}\n"
-    exit 1
-fi
-
-region_matched=false
-IFS=',' read -ra ALLOWED_LIST <<< "$ALLOW_COUNTRY"
-for allowed in "${ALLOWED_LIST[@]}"; do
-    trimmed="$(echo "$allowed" | xargs)"
-    if [ "$trimmed" = "$CURRENT_COUNTRY_CODE" ]; then
-        region_matched=true
-        break
+    if [[ "$entry" == */* ]]; then
+        local network="${entry%/*}"
+        local bits="${entry#*/}"
+        case "$bits" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        [ "$bits" -ge 0 ] && [ "$bits" -le 32 ] || return 1
+        local ip_int net_int
+        ip_int="$(ipv4_to_int "$ip")" || return 1
+        net_int="$(ipv4_to_int "$network")" || return 1
+        local mask=$(( bits == 0 ? 0 : (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF ))
+        [ $(( ip_int & mask )) -eq $(( net_int & mask )) ]
+        return $?
     fi
-done
 
-if [ "$region_matched" = true ]; then
-    printf "${GREEN}✓ Region check passed: '${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}) is allowed (region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP})${RESET}\n"
+    [ "$ip" = "$entry" ]
+}
+
+# Fetch a URL with a few retries (these public endpoints are occasionally flaky).
+curl_retry() {
+    local url="$1"
+    local out=""
+    for _ in 1 2 3; do
+        out=$(curl -fsS --max-time 10 "$url" || true)
+        if [ -n "$out" ]; then
+            echo "$out"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+printf "${CYAN}Checking access against CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}' / CODEMATE_ALLOW_IP='${ALLOW_IP}'...${RESET}\n"
+
+# Detect the public IP from ifconfig.me (plain text, just the address).
+CURRENT_QUERY_IP=$(curl_retry https://ifconfig.me/ip | tr -d '[:space:]' || true)
+
+# Detect the country/region from ip-api.com. This is non-fatal on its own: an
+# IP-only allowlist must still work when ip-api is momentarily unreachable.
+RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
+CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
+CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
+CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
+# Fall back to ip-api's reported query IP if ifconfig.me was unreachable.
+if [ -z "$CURRENT_QUERY_IP" ]; then
+    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
+fi
+
+if [ -z "$CURRENT_QUERY_IP" ] && [ -z "$CURRENT_COUNTRY_CODE" ]; then
+    printf "${RED}Could not detect IP (ifconfig.me) or country code (ip-api.com).${RESET}\n"
+    printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
+    exit 1
+fi
+
+# If a country allowlist is configured but ip-api is unreachable, warn: we can
+# only fall back to the IP check, so a legitimate country match may be missed.
+if [ -n "$ALLOW_COUNTRY" ] && [ -z "$CURRENT_COUNTRY_CODE" ]; then
+    printf "${YELLOW}⚠ Could not determine country from ip-api.com; relying on the IP allowlist only.${RESET}\n"
+fi
+
+# The check passes if EITHER the IP is allowlisted OR the country is allowlisted.
+ip_matched=false
+if [ -n "$ALLOW_IP" ] && [ -n "$CURRENT_QUERY_IP" ]; then
+    IFS=',' read -ra ALLOWED_IP_LIST <<< "$ALLOW_IP"
+    for allowed in "${ALLOWED_IP_LIST[@]}"; do
+        trimmed="$(echo "$allowed" | xargs)"
+        [ -n "$trimmed" ] || continue
+        if ip_matches_entry "$CURRENT_QUERY_IP" "$trimmed"; then
+            ip_matched=true
+            break
+        fi
+    done
+fi
+
+country_matched=false
+if [ -n "$ALLOW_COUNTRY" ] && [ -n "$CURRENT_COUNTRY_CODE" ]; then
+    IFS=',' read -ra ALLOWED_LIST <<< "$ALLOW_COUNTRY"
+    for allowed in "${ALLOWED_LIST[@]}"; do
+        trimmed="$(echo "$allowed" | xargs)"
+        if [ "$trimmed" = "$CURRENT_COUNTRY_CODE" ]; then
+            country_matched=true
+            break
+        fi
+    done
+fi
+
+if [ "$ip_matched" = true ] || [ "$country_matched" = true ]; then
+    if [ "$ip_matched" = true ]; then
+        matched_by="IP '${CURRENT_QUERY_IP}'"
+    else
+        matched_by="country '${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY})"
+    fi
+    printf "${GREEN}✓ Access check passed: matched by ${matched_by} (country=${CURRENT_COUNTRY_CODE}, region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP})${RESET}\n"
     exit 0
 fi
 
-printf "${RED}✗ Region mismatch: detected='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP}), allowed='${ALLOW_COUNTRY}'${RESET}\n"
+printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}', country='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}); allowed country='${ALLOW_COUNTRY}', allowed ip='${ALLOW_IP}'${RESET}\n"
 
-ISSUE_TITLE="CodeMate region check failed: ${CURRENT_COUNTRY_CODE} not in ${ALLOW_COUNTRY}"
+ISSUE_TITLE="CodeMate access check failed: ${CURRENT_COUNTRY_CODE}/${CURRENT_QUERY_IP} not allowed"
 ISSUE_BODY=$(cat <<EOF
-CodeMate refused to start Claude because the container's detected country code
-does not match \`CODEMATE_ALLOW_COUNTRY\`.
+CodeMate refused to start Claude because the container's detected IP and country
+do not match \`CODEMATE_ALLOW_IP\` or \`CODEMATE_ALLOW_COUNTRY\` (at least one must match).
 
 | Field | Value |
 | --- | --- |
 | Detected country code | \`${CURRENT_COUNTRY_CODE}\` |
 | Detected country | \`${CURRENT_COUNTRY}\` |
 | Detected region | \`${CURRENT_REGION}\` |
-| Detected IP | \`${CURRENT_QUERY_IP}\` |
+| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
 | Allowed country code(s) | \`${ALLOW_COUNTRY}\` |
+| Allowed IP(s) | \`${ALLOW_IP}\` |
 | Branch | \`${BRANCH_NAME:-unknown}\` |
 
 ip-api.com response:
@@ -71,13 +161,13 @@ EOF
 
 if command -v gh >/dev/null 2>&1; then
     if gh issue create --title "$ISSUE_TITLE" --body "$ISSUE_BODY" 2>&1; then
-        printf "${YELLOW}Filed region-mismatch issue on the repository.${RESET}\n"
+        printf "${YELLOW}Filed access-mismatch issue on the repository.${RESET}\n"
     else
-        printf "${YELLOW}Failed to file region-mismatch issue (gh issue create failed).${RESET}\n"
+        printf "${YELLOW}Failed to file access-mismatch issue (gh issue create failed).${RESET}\n"
     fi
 else
     printf "${YELLOW}gh CLI not available; skipping issue creation.${RESET}\n"
 fi
 
-printf "${RED}Exiting container due to region mismatch.${RESET}\n"
+printf "${RED}Exiting container due to access mismatch.${RESET}\n"
 exit 1
