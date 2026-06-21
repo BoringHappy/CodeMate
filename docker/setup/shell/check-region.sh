@@ -55,30 +55,47 @@ ip_matches_entry() {
     [ "$ip" = "$entry" ]
 }
 
+# Fetch a URL with a few retries (these public endpoints are occasionally flaky).
+curl_retry() {
+    local url="$1"
+    local out=""
+    for _ in 1 2 3; do
+        out=$(curl -fsS --max-time 10 "$url" || true)
+        if [ -n "$out" ]; then
+            echo "$out"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 printf "${CYAN}Checking access against CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}' / CODEMATE_ALLOW_IP='${ALLOW_IP}'...${RESET}\n"
 
 # Detect the public IP from ifconfig.me (plain text, just the address).
-CURRENT_QUERY_IP=$(curl -fsS --max-time 10 https://ifconfig.me/ip | tr -d '[:space:]' || true)
+CURRENT_QUERY_IP=$(curl_retry https://ifconfig.me/ip | tr -d '[:space:]' || true)
 
-# Detect the country/region from ip-api.com.
-RESPONSE=$(curl -fsS --max-time 10 http://ip-api.com/json/ || true)
-if [ -z "$RESPONSE" ]; then
-    printf "${RED}Failed to fetch region info from http://ip-api.com/json/${RESET}\n"
-    exit 1
-fi
-
-CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty')
-CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty')
-CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty')
+# Detect the country/region from ip-api.com. This is non-fatal on its own: an
+# IP-only allowlist must still work when ip-api is momentarily unreachable.
+RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
+CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
+CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
+CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
 # Fall back to ip-api's reported query IP if ifconfig.me was unreachable.
 if [ -z "$CURRENT_QUERY_IP" ]; then
-    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty')
+    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
 fi
 
 if [ -z "$CURRENT_QUERY_IP" ] && [ -z "$CURRENT_COUNTRY_CODE" ]; then
     printf "${RED}Could not detect IP (ifconfig.me) or country code (ip-api.com).${RESET}\n"
     printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
     exit 1
+fi
+
+# If a country allowlist is configured but ip-api is unreachable, warn: we can
+# only fall back to the IP check, so a legitimate country match may be missed.
+if [ -n "$ALLOW_COUNTRY" ] && [ -z "$CURRENT_COUNTRY_CODE" ]; then
+    printf "${YELLOW}⚠ Could not determine country from ip-api.com; relying on the IP allowlist only.${RESET}\n"
 fi
 
 # The check passes if EITHER the IP is allowlisted OR the country is allowlisted.
