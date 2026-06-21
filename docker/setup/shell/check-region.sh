@@ -135,21 +135,39 @@ if [ "$ip_matched" = true ] || [ "$country_matched" = true ]; then
     exit 0
 fi
 
-printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}', country='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}); allowed country='${ALLOW_COUNTRY}', allowed ip='${ALLOW_IP}'${RESET}\n"
+# Only one allowlist is consulted per run (IP takes precedence over country),
+# so report against whichever check was actually in effect.
+if [ -n "$ALLOW_IP" ]; then
+    printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}' is not in the IP allowlist '${ALLOW_IP}'${RESET}\n"
 
-ISSUE_TITLE="CodeMate access check failed: ${CURRENT_COUNTRY_CODE}/${CURRENT_QUERY_IP} not allowed"
-ISSUE_BODY=$(cat <<EOF
-CodeMate refused to start Claude because the container's detected IP and country
-do not match \`CODEMATE_ALLOW_IP\` or \`CODEMATE_ALLOW_COUNTRY\` (at least one must match).
+    ISSUE_TITLE="CodeMate access check failed: IP ${CURRENT_QUERY_IP} not allowed"
+    ISSUE_BODY=$(cat <<EOF
+CodeMate refused to start Claude because the container's detected IP does not
+match \`CODEMATE_ALLOW_IP\`. (\`CODEMATE_ALLOW_IP\` takes precedence; the
+\`CODEMATE_ALLOW_COUNTRY\` allowlist is only consulted when \`CODEMATE_ALLOW_IP\` is unset.)
+
+| Field | Value |
+| --- | --- |
+| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
+| Allowed IP(s) | \`${ALLOW_IP}\` |
+| Branch | \`${BRANCH_NAME:-unknown}\` |
+EOF
+)
+else
+    printf "${RED}✗ Access mismatch: detected country='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP}) is not in the country allowlist '${ALLOW_COUNTRY}'${RESET}\n"
+
+    ISSUE_TITLE="CodeMate access check failed: country ${CURRENT_COUNTRY_CODE} not allowed"
+    ISSUE_BODY=$(cat <<EOF
+CodeMate refused to start Claude because the container's detected country does
+not match \`CODEMATE_ALLOW_COUNTRY\`. (No \`CODEMATE_ALLOW_IP\` allowlist was configured.)
 
 | Field | Value |
 | --- | --- |
 | Detected country code | \`${CURRENT_COUNTRY_CODE}\` |
 | Detected country | \`${CURRENT_COUNTRY}\` |
 | Detected region | \`${CURRENT_REGION}\` |
-| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
+| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
 | Allowed country code(s) | \`${ALLOW_COUNTRY}\` |
-| Allowed IP(s) | \`${ALLOW_IP}\` |
 | Branch | \`${BRANCH_NAME:-unknown}\` |
 
 ip-api.com response:
@@ -159,6 +177,7 @@ ${RESPONSE}
 \`\`\`
 EOF
 )
+fi
 
 if command -v gh >/dev/null 2>&1; then
     if gh issue create --title "$ISSUE_TITLE" --body "$ISSUE_BODY" 2>&1; then
