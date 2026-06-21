@@ -70,37 +70,28 @@ curl_retry() {
     return 1
 }
 
-printf "${CYAN}Checking access against CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}' / CODEMATE_ALLOW_IP='${ALLOW_IP}'...${RESET}\n"
+printf "${CYAN}Checking access against CODEMATE_ALLOW_IP='${ALLOW_IP}' / CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}'...${RESET}\n"
 
-# Detect the public IP from ifconfig.me (plain text, just the address).
-CURRENT_QUERY_IP=$(curl_retry https://ifconfig.me/ip | tr -d '[:space:]' || true)
-
-# Detect the country/region from ip-api.com. This is non-fatal on its own: an
-# IP-only allowlist must still work when ip-api is momentarily unreachable.
-RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
-CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
-CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
-CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
-# Fall back to ip-api's reported query IP if ifconfig.me was unreachable.
-if [ -z "$CURRENT_QUERY_IP" ]; then
-    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
-fi
-
-if [ -z "$CURRENT_QUERY_IP" ] && [ -z "$CURRENT_COUNTRY_CODE" ]; then
-    printf "${RED}Could not detect IP (ifconfig.me) or country code (ip-api.com).${RESET}\n"
-    printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
-    exit 1
-fi
-
-# If a country allowlist is configured but ip-api is unreachable, warn: we can
-# only fall back to the IP check, so a legitimate country match may be missed.
-if [ -n "$ALLOW_COUNTRY" ] && [ -z "$CURRENT_COUNTRY_CODE" ]; then
-    printf "${YELLOW}⚠ Could not determine country from ip-api.com; relying on the IP allowlist only.${RESET}\n"
-fi
-
-# The check passes if EITHER the IP is allowlisted OR the country is allowlisted.
+# CODEMATE_ALLOW_IP takes precedence: when it is set we only query ifconfig.me
+# and skip the ip-api.com country lookup entirely (one fewer external call).
+# The country allowlist is consulted only when CODEMATE_ALLOW_IP is unset.
 ip_matched=false
-if [ -n "$ALLOW_IP" ] && [ -n "$CURRENT_QUERY_IP" ]; then
+country_matched=false
+
+if [ -n "$ALLOW_IP" ]; then
+    # Detect the public IP from ifconfig.me (plain text, just the address).
+    CURRENT_QUERY_IP=$(curl_retry https://ifconfig.me/ip | tr -d '[:space:]' || true)
+    # Fall back to ip-api.com for the IP only if ifconfig.me was unreachable.
+    if [ -z "$CURRENT_QUERY_IP" ]; then
+        RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
+        CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
+    fi
+
+    if [ -z "$CURRENT_QUERY_IP" ]; then
+        printf "${RED}Could not detect IP (ifconfig.me / ip-api.com).${RESET}\n"
+        exit 1
+    fi
+
     IFS=',' read -ra ALLOWED_IP_LIST <<< "$ALLOW_IP"
     for allowed in "${ALLOWED_IP_LIST[@]}"; do
         trimmed="$(echo "$allowed" | xargs)"
@@ -110,10 +101,20 @@ if [ -n "$ALLOW_IP" ] && [ -n "$CURRENT_QUERY_IP" ]; then
             break
         fi
     done
-fi
+else
+    # No IP allowlist configured: fall back to the country allowlist via ip-api.com.
+    RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
+    CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
+    CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
+    CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
+    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
 
-country_matched=false
-if [ -n "$ALLOW_COUNTRY" ] && [ -n "$CURRENT_COUNTRY_CODE" ]; then
+    if [ -z "$CURRENT_COUNTRY_CODE" ]; then
+        printf "${RED}Could not detect country code (ip-api.com).${RESET}\n"
+        printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
+        exit 1
+    fi
+
     IFS=',' read -ra ALLOWED_LIST <<< "$ALLOW_COUNTRY"
     for allowed in "${ALLOWED_LIST[@]}"; do
         trimmed="$(echo "$allowed" | xargs)"
@@ -134,21 +135,39 @@ if [ "$ip_matched" = true ] || [ "$country_matched" = true ]; then
     exit 0
 fi
 
-printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}', country='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}); allowed country='${ALLOW_COUNTRY}', allowed ip='${ALLOW_IP}'${RESET}\n"
+# Only one allowlist is consulted per run (IP takes precedence over country),
+# so report against whichever check was actually in effect.
+if [ -n "$ALLOW_IP" ]; then
+    printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}' is not in the IP allowlist '${ALLOW_IP}'${RESET}\n"
 
-ISSUE_TITLE="CodeMate access check failed: ${CURRENT_COUNTRY_CODE}/${CURRENT_QUERY_IP} not allowed"
-ISSUE_BODY=$(cat <<EOF
-CodeMate refused to start Claude because the container's detected IP and country
-do not match \`CODEMATE_ALLOW_IP\` or \`CODEMATE_ALLOW_COUNTRY\` (at least one must match).
+    ISSUE_TITLE="CodeMate access check failed: IP ${CURRENT_QUERY_IP} not allowed"
+    ISSUE_BODY=$(cat <<EOF
+CodeMate refused to start Claude because the container's detected IP does not
+match \`CODEMATE_ALLOW_IP\`. (\`CODEMATE_ALLOW_IP\` takes precedence; the
+\`CODEMATE_ALLOW_COUNTRY\` allowlist is only consulted when \`CODEMATE_ALLOW_IP\` is unset.)
+
+| Field | Value |
+| --- | --- |
+| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
+| Allowed IP(s) | \`${ALLOW_IP}\` |
+| Branch | \`${BRANCH_NAME:-unknown}\` |
+EOF
+)
+else
+    printf "${RED}✗ Access mismatch: detected country='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP}) is not in the country allowlist '${ALLOW_COUNTRY}'${RESET}\n"
+
+    ISSUE_TITLE="CodeMate access check failed: country ${CURRENT_COUNTRY_CODE} not allowed"
+    ISSUE_BODY=$(cat <<EOF
+CodeMate refused to start Claude because the container's detected country does
+not match \`CODEMATE_ALLOW_COUNTRY\`. (No \`CODEMATE_ALLOW_IP\` allowlist was configured.)
 
 | Field | Value |
 | --- | --- |
 | Detected country code | \`${CURRENT_COUNTRY_CODE}\` |
 | Detected country | \`${CURRENT_COUNTRY}\` |
 | Detected region | \`${CURRENT_REGION}\` |
-| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
+| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
 | Allowed country code(s) | \`${ALLOW_COUNTRY}\` |
-| Allowed IP(s) | \`${ALLOW_IP}\` |
 | Branch | \`${BRANCH_NAME:-unknown}\` |
 
 ip-api.com response:
@@ -158,6 +177,7 @@ ${RESPONSE}
 \`\`\`
 EOF
 )
+fi
 
 if command -v gh >/dev/null 2>&1; then
     if gh issue create --title "$ISSUE_TITLE" --body "$ISSUE_BODY" 2>&1; then
