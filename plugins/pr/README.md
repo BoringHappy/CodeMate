@@ -65,6 +65,8 @@ claude --plugin-dir /path/to/pr
 - Git repository with remote access
 - Active pull request (for most skills)
 
+> Always pass `--json` with explicit fields to `gh pr view`/`gh pr list`; bare calls fail on the Projects (classic) deprecation.
+
 ## Plugin Structure
 
 ```
@@ -82,4 +84,4 @@ pr/
 
 ## Version
 
-1.0.0
+1.0.2

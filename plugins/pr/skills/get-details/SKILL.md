@@ -56,3 +56,5 @@ PR comments:
 7. **PR Comments** - Summary of general comments (if any)
 
 Format the output clearly using markdown so the user can see the PR details at a glance. This summary should always be visible in your response to the user.
+
+> Always pass `--json` with explicit fields to `gh pr view`/`gh pr list`; bare calls fail on the Projects (classic) deprecation.
