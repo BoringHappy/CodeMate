@@ -1,101 +1,94 @@
 ---
 name: update
-description: Updates the summary/description and optionally the title of a GitHub pull request. Use `/pr:update` to update both title and summary, or `/pr:update --summary-only` to update only the summary.
+description: Updates the summary/description and (by default) the title of a GitHub pull request. Use `/pr:update` to update both title and summary, or `/pr:update --skip-title` to update only the summary.
 context: fork
 ---
 
 # Update PR Summary and Title
 
-Analyzes the current pull request changes and generates an improved summary/description and optionally title.
+Generates an improved PR description (and optionally title) from the branch's commits and diff, then updates the PR.
+
+> This skill runs in a **forked context**, so it gathers its own state below. It does **not** inherit `/pr:get-details` output from the main conversation, and it deliberately avoids `/pr:get-details` (which fetches reviews/comments and never returns the code diff — irrelevant and costly here).
 
 ## Arguments
 
 $ARGUMENTS
 
-**Supported arguments:**
-- `--summary-only`: Only update the PR summary/description, skip title update
-- (no arguments): Update both title and summary (default behavior)
-
-## What it does
-
-1. **Fetches PR information**: Uses `/pr:get-details` skill to get the current PR title, description, diff, and metadata
-2. **Checks for template**: Looks for pull_request_template.md to follow the project's format
-3. **Generates improved summary**: Creates a better description based on the actual changes
-4. **Generates improved title**: Creates a concise, descriptive title based on the changes (unless `--summary-only` is specified)
-5. **Updates the PR**: Uses `gh api` REST API to update the PR
+- `--skip-title`: skip the title update, change only the description
+- (no arguments): update both title and description
 
 ## Prerequisites
 
-**Check PR Status:**
-!`if [ -s /tmp/.pr_status ]; then echo "[OK] PR exists: $(cat /tmp/.pr_status)"; else echo "[WARN] No PR created yet"; fi`
-
-**Before proceeding, verify PR exists:**
-```bash
+!```bash
 if [ ! -s /tmp/.pr_status ]; then
     echo "[ERROR] No PR has been created yet."
     exit 1
 fi
+echo "[OK] PR: $(cat /tmp/.pr_status)"
 ```
 
-## Current PR Information
+## PR context and change overview
 
-**IMPORTANT**: Before proceeding, you MUST use the `/pr:get-details` skill to fetch the current PR information including:
-- Current PR title
-- Current PR description/body
-- PR diff showing all changes
-- List of files changed
+Fetched from GitHub in a single `gh pr view` call — correct for both standard and fork PRs (no dependence on local base-branch refs):
 
-This provides the necessary context to generate an improved summary and title.
+!```bash
+META=$(gh pr view --json number,baseRefName,title,body,commits,files)
 
-## Template Format
+echo "PR_NUMBER: $(printf '%s' "$META" | jq -r .number)"
+echo "BASE_BRANCH: $(printf '%s' "$META" | jq -r .baseRefName)"
+echo
+echo "=== Current title ==="
+printf '%s' "$META" | jq -r .title
+echo
+echo "=== Current description (preserve checkbox text; only toggle [ ]/[x]) ==="
+printf '%s' "$META" | jq -r .body
+echo
+echo "=== Commits (primary source for the summary) ==="
+printf '%s' "$META" | jq -r '.commits[] | "\(.oid[0:9]) \(.messageHeadline)", (.messageBody | select(. != ""))'
+echo
+echo "=== Files changed ==="
+printf '%s' "$META" | jq -r '.files[] | "+\(.additions) -\(.deletions)\t\(.path)"'
+```
 
-!`if [ -f .github/PULL_REQUEST_TEMPLATE.md ]; then cat .github/PULL_REQUEST_TEMPLATE.md; elif [ -f .github/pull_request_template.md ]; then cat .github/pull_request_template.md; elif [ -f pull_request_template.md ]; then cat pull_request_template.md; else echo "No template found"; fi`
+## PR template
+
+!```bash
+for f in .github/PULL_REQUEST_TEMPLATE.md .github/pull_request_template.md pull_request_template.md; do
+    [ -f "$f" ] && cat "$f" && break
+done
+```
 
 ## Instructions
 
-Based on the PR diff and current information above:
+### 1. Decide whether you need the full diff
+The commit log and file-level diffstat above are your primary source. Write the summary directly from them **when the commit messages clearly describe the changes**. Only when they are vague or insufficient, read the actual code changes:
 
-### For the Summary
-Create an improved PR summary that:
-- Accurately describes what changes were made and why
-- Follows the template format if one exists
-- Is clear, concise, and informative
-- Highlights the key changes and their impact
-- Includes relevant technical details
-- **IMPORTANT**: Never modify the text content of checkbox items (e.g., `- [ ] Tests pass locally`). Only change whether checkboxes are checked `[x]` or unchecked `[ ]`. The checkbox text must remain exactly as it appears in the template or existing PR description.
-
-### For the Title (skip if `--summary-only` argument is provided)
-Create an improved PR title that:
-- Is concise (typically 50-72 characters)
-- Clearly describes the main change or feature
-- Follows conventional commit style if the project uses it
-- Is written in imperative mood (e.g., "Add feature" not "Added feature")
-- Captures the essence of all changes
-
-### Updating the PR
-
-**If `--summary-only` argument is provided**, only update the summary:
 ```bash
-gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number) -X PATCH -f body='Your improved summary here'
+gh pr diff   # full unified diff for this PR (fork-correct); the main token cost
 ```
 
-**If no arguments or updating both**, update both title and summary using a single API call:
+Skip this whenever the commits already explain the changes; for a targeted look, focus on the files listed in the diffstat above.
+
+### 2. Write the summary
+- Accurately describe what changed and why, based on the commits/diff above
+- Follow the template format if one was found; otherwise keep it clear and structured
+- **Preserve existing checkbox text verbatim** — only change `[ ]` ↔ `[x]`
+
+### 3. Write the title (skip if `--skip-title`)
+- Concise (≈50–72 chars), imperative mood, conventional-commit style if the repo uses it
+
+### 4. Update the PR
+**Skip title (`--skip-title`):**
 ```bash
-gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number) -X PATCH -f title="Your improved title here" -f body='Your improved summary here'
+gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number) -X PATCH -f body='BODY'
 ```
 
-### Adding the `pr-updated` label
+**Both title and summary (default):**
+```bash
+gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number) -X PATCH -f title="TITLE" -f body='BODY'
+```
 
-After successfully updating the PR, add the `pr-updated` label so monitors and reviewers can see the PR description has been refreshed:
-
+### 5. Add the `pr-updated` label
 ```bash
 gh api repos/:owner/:repo/issues/$(gh pr view --json number -q .number)/labels --input - <<< '["pr-updated"]'
 ```
-
-This step runs in both `--summary-only` and default modes.
-
-## Prerequisites
-
-- Must be run in a git repository with an active pull request
-- GitHub CLI (`gh`) must be installed and authenticated
-- Must have write access to the repository
