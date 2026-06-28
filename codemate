@@ -480,6 +480,7 @@ run_codemate() {
         "$CODEMATE_IMAGE"
     )
 
+    print_info "Pulling image: $CODEMATE_IMAGE"
     "${docker_cmd[@]}"
 }
 
