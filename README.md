@@ -251,7 +251,7 @@ On startup, the container:
 | `/pr:get-details` | Fetch PR information including title, description, file changes, and review comments |
 | `/pr:create` | Create a pull request from the current branch; supports standard and fork workflows |
 | `/pr:fix-comments` | Read PR review comments, fix the issues, commit changes, and reply to comments |
-| `/pr:update` | Update PR title and/or summary. Use `--summary-only` to update only the summary |
+| `/pr:update` | Update PR title and/or summary. Use `--skip-title` to update only the summary |
 | `/pr:ack-comments` | Acknowledge PR issue comments by adding 👀 reaction |
 
 **Issue Plugin** (`issue@codemate`):

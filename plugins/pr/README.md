@@ -42,7 +42,7 @@ Updates the PR title and/or description based on the actual changes.
 **Usage:**
 ```
 /pr:update                  # Update both title and summary
-/pr:update --summary-only   # Update only the summary
+/pr:update --skip-title     # Update only the summary (skip the title)
 ```
 
 **Features:**

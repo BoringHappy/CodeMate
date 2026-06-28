@@ -9,39 +9,43 @@ Retrieves and displays pull request information including title, description, ch
 
 ## Prerequisites
 
-**Check PR Status:**
-!`if [ -s /tmp/.pr_status ]; then echo "[OK] PR exists: $(cat /tmp/.pr_status)"; else echo "[WARN] No PR created yet"; fi`
-
-**Before proceeding, verify PR exists:**
-```bash
+!```bash
 if [ ! -s /tmp/.pr_status ]; then
     echo "[ERROR] No PR has been created yet."
     exit 1
 fi
+echo "[OK] PR exists: $(cat /tmp/.pr_status)"
 ```
 
 ## PR Information
 
-Title:
-!`gh pr view --json title -q .title | cat`
+Fetched in a single `gh pr view` call (plus one `gh api` call for inline code comments) to keep API usage and tokens low:
 
-Branch:
-!`gh pr view --json headRefName,baseRefName -q '"\(.headRefName) → \(.baseRefName)"' | cat`
+!```bash
+PR=$(gh pr view --json number,title,headRefName,baseRefName,body,files,reviews,comments)
+N=$(printf '%s' "$PR" | jq -r '.number')
 
-Description:
-!`gh pr view --json body -q .body | cat`
+echo "Title:"
+printf '%s' "$PR" | jq -r '.title'
 
-Changed files:
-!`gh pr view --json files -q '.files[].path' | cat`
+echo; echo "Branch:"
+printf '%s' "$PR" | jq -r '"\(.headRefName) → \(.baseRefName)"'
 
-Review comments:
-!`gh pr view --json reviews -q '.reviews[] | "**\(.author.login)** (\(.state)) - \(.submittedAt):\n\(.body)\n"' | cat`
+echo; echo "Description:"
+printf '%s' "$PR" | jq -r '.body'
 
-Inline review comments (code comments):
-!`gh api repos/:owner/:repo/pulls/$(gh pr view --json number -q .number)/comments --jq '.[] | "**\(.user.login)** on \(.path):\(.line) - \(.created_at) [comment_id:\(.id)]:\n\(.body)\n"' | cat`
+echo; echo "Changed files:"
+printf '%s' "$PR" | jq -r '.files[].path'
 
-PR comments:
-!`gh pr view --json comments -q '.comments[] | "**\(.author.login)** - \(.createdAt):\n\(.body)\n"' | cat`
+echo; echo "Review comments:"
+printf '%s' "$PR" | jq -r '.reviews[] | "**\(.author.login)** (\(.state)) - \(.submittedAt):\n\(.body)\n"'
+
+echo; echo "Inline review comments (code comments):"
+gh api repos/:owner/:repo/pulls/"$N"/comments --jq '.[] | "**\(.user.login)** on \(.path):\(.line) - \(.created_at) [comment_id:\(.id)]:\n\(.body)\n"'
+
+echo; echo "PR comments:"
+printf '%s' "$PR" | jq -r '.comments[] | "**\(.author.login)** - \(.createdAt):\n\(.body)\n"'
+```
 
 ## Instructions
 

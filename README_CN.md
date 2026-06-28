@@ -268,7 +268,7 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 |---------|-------------|
 | `/pr:get-details` | 获取 PR 信息，包括标题、描述、文件更改和 review comments |
 | `/pr:fix-comments` | 读取 PR review comments，修复问题，commit 更改并回复 comments |
-| `/pr:update` | 更新 PR 标题和摘要。使用 `--summary-only` 仅更新摘要 |
+| `/pr:update` | 更新 PR 标题和摘要。使用 `--skip-title` 仅更新摘要 |
 | `/pr:ack-comments` | 通过添加 👀 表情确认 PR issue comments |
 | `/pr:read-issue` | ~~已移至 `/issue:read-issue`~~ 读取 GitHub issue 详情，包括标题、描述、标签和评论 |
 
