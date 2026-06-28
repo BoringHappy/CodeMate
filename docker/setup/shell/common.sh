@@ -152,5 +152,20 @@ send_and_verify_command() {
     return 0
 }
 
+# Standardized logging helpers (reuse the color codes defined above).
+# Each prints a leveled, colorized message to stderr so it never pollutes
+# values captured via command substitution.
+# Usage: log_info "message" / log_warn "message" / log_error "message"
+log_info() {
+    printf "${GREEN}[INFO]${RESET} %s\n" "$*" >&2
+}
+
+log_warn() {
+    printf "${YELLOW}[WARN]${RESET} %s\n" "$*" >&2
+}
+
+log_error() {
+    printf "${RED}[ERROR]${RESET} %s\n" "$*" >&2
+}
 
 
