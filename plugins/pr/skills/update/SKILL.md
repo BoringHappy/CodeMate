@@ -29,14 +29,13 @@ echo "[OK] PR: $(cat /tmp/.pr_status)"
 
 ## PR context and change overview
 
-Sourced from local git (always current) plus a single `gh pr view` call:
+Fetched from GitHub in a single `gh pr view` call — correct for both standard and fork PRs (no dependence on local base-branch refs):
 
 !```bash
-META=$(gh pr view --json baseRefName,title,body)
-BASE=$(printf '%s' "$META" | jq -r .baseRefName)
-git rev-parse -q --verify "origin/$BASE" >/dev/null 2>&1 || git fetch -q origin "$BASE"
+META=$(gh pr view --json number,baseRefName,title,body,commits,files)
 
-echo "BASE_BRANCH: $BASE"
+echo "PR_NUMBER: $(printf '%s' "$META" | jq -r .number)"
+echo "BASE_BRANCH: $(printf '%s' "$META" | jq -r .baseRefName)"
 echo
 echo "=== Current title ==="
 printf '%s' "$META" | jq -r .title
@@ -44,10 +43,11 @@ echo
 echo "=== Current description (preserve checkbox text; only toggle [ ]/[x]) ==="
 printf '%s' "$META" | jq -r .body
 echo
-echo "=== Commits: origin/$BASE..HEAD (primary source for the summary) ==="
-git log --format='%h %s%n%b' "origin/$BASE..HEAD"
+echo "=== Commits (primary source for the summary) ==="
+printf '%s' "$META" | jq -r '.commits[] | "\(.oid[0:9]) \(.messageHeadline)", (.messageBody | select(. != ""))'
+echo
 echo "=== Files changed ==="
-git diff --stat "origin/$BASE...HEAD"
+printf '%s' "$META" | jq -r '.files[] | "+\(.additions) -\(.deletions)\t\(.path)"'
 ```
 
 ## PR template
@@ -61,14 +61,13 @@ done
 ## Instructions
 
 ### 1. Decide whether you need the full diff
-The commit log and diffstat above are your primary source. Write the summary directly from them **when the commit messages clearly describe the changes**. Only when they are vague or insufficient, read the actual code changes — scoped to the files that matter, using the `BASE_BRANCH` printed above:
+The commit log and file-level diffstat above are your primary source. Write the summary directly from them **when the commit messages clearly describe the changes**. Only when they are vague or insufficient, read the actual code changes:
 
 ```bash
-git diff origin/<BASE_BRANCH>...HEAD -- <path>   # scope to specific files
-git diff origin/<BASE_BRANCH>...HEAD             # full diff (last resort)
+gh pr diff   # full unified diff for this PR (fork-correct); the main token cost
 ```
 
-Reading the full diff is the main token cost — skip it whenever the commits already explain the changes.
+Skip this whenever the commits already explain the changes; for a targeted look, focus on the files listed in the diffstat above.
 
 ### 2. Write the summary
 - Accurately describe what changed and why, based on the commits/diff above
