@@ -24,7 +24,7 @@ NO_PR="${NO_PR:-}"
 DOCKER_EXTRA_PARAMS=()
 CODEMATE_IMAGE="${CODEMATE_IMAGE:-ghcr.io/boringhappy/codemate:latest}"
 BUILD_LOCAL=false
-DOCKERFILE_PATH="docker/Dockerfile.claude"
+DOCKERFILE_PATH="docker/Dockerfile"
 IMAGE_TAG=""
 
 # Function to print colored messages
@@ -508,7 +508,7 @@ Options:
   --image IMAGE        Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
                        Note: Ignored when --build is used
   --build              Build Docker image from local Dockerfile
-  -f, --dockerfile PATH  Path to Dockerfile (default: docker/Dockerfile.claude, requires --build)
+  -f, --dockerfile PATH  Path to Dockerfile (default: docker/Dockerfile, requires --build)
   --tag TAG            Image tag for local build (default: codemate:local)
                        Note: Only works with --build. To use a pre-built image, use --image instead
   --help               Show this help message

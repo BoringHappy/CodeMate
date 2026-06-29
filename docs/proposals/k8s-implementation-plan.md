@@ -34,7 +34,7 @@ effort → decisions.
 | Shared Claude-auth PVC (`~/.claude`, `~/.claude.json`) | **New** (RWX) | replaces per-container Claude login |
 | Claude auth init pod | **New** (one-time `claude login` via `kubectl exec`) | — |
 | PR-bound Claude session store + resume | **New** | `run-claude.sh` gains `claude --resume` |
-| Agent pod image | **Modify** | `docker/Dockerfile.claude`, `docker/setup/*` (drop cron) |
+| Agent pod image | **Modify** | `docker/Dockerfile`, `docker/setup/*` (drop cron) |
 | Tmux launch + injection | **Reuse** | `docker/setup/run-claude.sh`, `common.sh::send_and_verify_command` |
 | Idle/commit hooks | **Reuse** | `plugins/workspace/hooks/*` |
 | Repo/branch/PR bootstrap | **Reuse/extend** | `docker/setup/python/setup-repo.py` |
@@ -50,7 +50,7 @@ effort → decisions.
 separate repo yet.**
 
 The operator is tightly coupled to what already lives here: it drives the existing image
-(`docker/Dockerfile.claude`), the sidecar ports logic from `monitor-pr.sh` / `common.sh`, and it depends on
+(`docker/Dockerfile`), the sidecar ports logic from `monitor-pr.sh` / `common.sh`, and it depends on
 the existing hooks and `/pr:* /git:* /issue:*` plugins. The strangler migration (Phase 1 edits
 `docker/setup/*` *and* adds operator code at once) is far simpler as atomic PRs in one repo than as a
 coordinated cross-repo dance. One team, early stage, fast iteration, and reuse of existing CI / issue
@@ -80,7 +80,7 @@ CodeMate/
 
 ### Conventions for the monorepo
 - **Separate CI:** add a workflow that runs the operator's Python tests/lint only on `operator/`
-  changes; the existing `docker-build-claude.yml` keeps owning the image.
+  changes; the existing `docker-build.yml` keeps owning the image.
 - **Independent versioning:** tag the operator/chart with a prefix (e.g. `operator/v0.1.0`,
   `chart/v0.1.0`) so release cadence is decoupled from the image without separate repos.
 - **Plugin version-bump rule** (`.claude/rules/plugin-version-bump.md`) still applies to any

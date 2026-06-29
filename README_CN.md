@@ -2,9 +2,9 @@
 
 [English](README.md) | 简体中文
 
-基于 Docker 的 Claude Code 环境，具有自动化 Git/PR 设置功能。
+基于 Docker 的 Claude Code 和 Codex 环境，具有自动化 Git/PR 设置功能。
 
-> **⚠️ 安全提示：** 此容器默认使用 `--dangerously-skip-permissions` 运行，允许 Claude 无需确认即可执行命令。仅在隔离环境中使用受信任的代码仓库。
+> **⚠️ 安全提示：** 此容器运行所选 agent 时不会请求操作确认。仅在隔离环境中使用受信任的代码仓库。
 
 ## 为什么选择 CodeMate？
 
@@ -73,6 +73,10 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 # 使用分支名称运行（自动检测仓库来源：--repo > .env > 当前目录的 git remote）
 codemate --branch feature/your-branch
 
+# 使用 Codex（默认运行 Claude）
+echo 'CODEMATE_AGENT=codex' >> .env
+codemate --branch feature/your-branch
+
 # 使用现有 PR 运行
 codemate --pr 123
 
@@ -138,7 +142,7 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
 
 **选项：**
 - `--build` - 运行前从本地 Dockerfile 构建 Docker image
-- `-f, --dockerfile PATH` - Dockerfile 路径（默认：`docker/Dockerfile.claude`）
+- `-f, --dockerfile PATH` - Dockerfile 路径（默认：`docker/Dockerfile`）
 - `--tag TAG` - 本地构建的 image tag（默认：`codemate:local`）
   - **注意：** 仅与 `--build` 一起使用。要使用预构建 image，请使用 `--image`
 
@@ -230,10 +234,11 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 | `GIT_USER_NAME` | 自动 | Git commit author 名称（如果未提供，默认为 `git config user.name`） |
 | `GIT_USER_EMAIL` | 自动 | Git commit author 邮箱（如果未提供，默认为 `git config user.email`） |
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
+| `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
 | `SLACK_WEBHOOK` | 否 | Slack Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `ANTHROPIC_AUTH_TOKEN` | 否 | Anthropic API token（用于自定义 API 端点） |
 | `ANTHROPIC_BASE_URL` | 否 | Anthropic API 基础 URL（用于自定义 API 端点） |
-| `QUERY` | 否 | 启动后发送给 Claude 的初始 query |
+| `QUERY` | 否 | 启动后发送给所选 agent 的初始 query |
 | `DEFAULT_MARKETPLACES` | 否 | 逗号分隔的默认插件市场（默认：`BoringHappy/CodeMate`） |
 | `DEFAULT_PLUGINS` | 否 | 逗号分隔的默认插件（默认：`git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`） |
 | `CUSTOM_MARKETPLACES` | 否 | 逗号分隔的自定义插件市场仓库列表（例如：`username/repo1,org/repo2`） |
@@ -248,8 +253,8 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 1. clone/更新 repository 到 `/home/agent/<repo-name>`
 2. checkout 指定的 branch 或 PR
 3. 如果在新 branch 上工作，则创建 PR
-4. 在 tmux session 中使用 `--dangerously-skip-permissions` 标志启动 Claude Code
-5. 如果提供了 `--query`，则向 Claude 发送初始 query
+4. 在对应的 tmux session 中启动 Claude Code 或 Codex
+5. 如果提供了 `--query`，则向所选 agent 发送初始 query
 6. 运行 cron job 监控 PR 评论（每分钟）
 
 ## Skills
