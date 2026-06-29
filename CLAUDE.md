@@ -37,7 +37,7 @@ Parameters:
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
-6. `setup/run-claude.sh` and `setup/run-codex.sh` enforce the region restriction immediately before launching their agent. `CODEMATE_ALLOW_IP` takes precedence over `CODEMATE_ALLOW_COUNTRY`; failed checks file a GitHub issue and stop startup.
+6. `setup/setup.sh` enforces the region restriction before any other setup. `CODEMATE_ALLOW_IP` takes precedence over `CODEMATE_ALLOW_COUNTRY`; failed checks file a GitHub issue and stop startup.
 7. `setup/run-claude.sh` performs ccline and Claude plugin setup, starts the PR-monitor cron daemon, and launches Claude Code with the appropriate system prompt. `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh` and launches Codex.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.

@@ -6,9 +6,6 @@ SETUP_DIR="$(dirname "$0")"
 # Source common utilities
 source "$SETUP_DIR/shell/common.sh"
 
-# Launch-time checks and services run after image/repository setup succeeds.
-run_setup_script "$SETUP_DIR/shell/check-region.sh" "Running check-region.sh..."
-
 printf "${GREEN}Starting cron daemon...${RESET}\n"
 sudo service cron start || sudo cron || true
 

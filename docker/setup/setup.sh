@@ -6,6 +6,7 @@ SETUP_DIR="/usr/local/bin/setup"
 # Source common utilities
 source "$SETUP_DIR/shell/common.sh"
 
+run_setup_script "$SETUP_DIR/shell/check-region.sh" "Running check-region.sh..."
 run_setup_script "$SETUP_DIR/shell/setup-git.sh" "Running setup-git.sh..."
 run_setup_script "$SETUP_DIR/shell/setup-gh.sh" "Running setup-gh.sh..."
 run_setup_script "$SETUP_DIR/python/setup-repo.py" "Running setup-repo.py..."
