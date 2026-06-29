@@ -12,6 +12,10 @@ run_setup_script "$SETUP_DIR/shell/check-region.sh" "Running check-region.sh..."
 printf "${GREEN}Starting cron daemon...${RESET}\n"
 sudo service cron start || sudo cron || true
 
+# Claude-specific setup belongs in the Claude runner.
+run_setup_script "$SETUP_DIR/python/setup-ccline.py" "Running setup-ccline.py..."
+run_setup_script "$SETUP_DIR/shell/setup-plugins.sh" "Running setup-plugins.sh..."
+
 # Configuration
 CLAUDE_SESSION="claude-code"
 

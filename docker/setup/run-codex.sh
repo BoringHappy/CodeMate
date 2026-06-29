@@ -9,6 +9,9 @@ source "$SETUP_DIR/shell/common.sh"
 # Enforce the same launch-time access restriction as the Claude Code image.
 run_setup_script "$SETUP_DIR/shell/check-region.sh" "Running check-region.sh..."
 
+# Install or refresh Codex-specific marketplaces and plugins before launch.
+run_setup_script "$SETUP_DIR/shell/setup-codex-plugins.sh" "Running setup-codex-plugins.sh..."
+
 CODEX_SESSION="codex"
 
 printf "${GREEN}Starting CodeMate Codex with tmux...${RESET}\n"
