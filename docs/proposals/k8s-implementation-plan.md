@@ -80,7 +80,7 @@ CodeMate/
 
 ### Conventions for the monorepo
 - **Separate CI:** add a workflow that runs the operator's Python tests/lint only on `operator/`
-  changes; the existing `docker-build-push.yml` keeps owning the image.
+  changes; the existing `docker-build-claude.yml` keeps owning the image.
 - **Independent versioning:** tag the operator/chart with a prefix (e.g. `operator/v0.1.0`,
   `chart/v0.1.0`) so release cadence is decoupled from the image without separate repos.
 - **Plugin version-bump rule** (`.claude/rules/plugin-version-bump.md`) still applies to any

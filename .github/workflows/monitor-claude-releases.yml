@@ -57,7 +57,7 @@ jobs:
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: 'docker-build-push.yml',
+              workflow_id: 'docker-build-claude.yml',
               ref: 'main'
             });
             console.log('Triggered docker-build-push workflow for Claude Code version ${{ steps.check.outputs.version }}');

@@ -129,5 +129,5 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 ## Development Notes
 
 - No test suite exists - this is infrastructure/tooling
-- GitHub Actions workflow (`docker-build-push.yml`) builds and pushes to GHCR on main branch and tags
+- GitHub Actions workflow (`docker-build-claude.yml`) builds and pushes the Claude image to GHCR on main branch and tags
 - Multi-platform builds: linux/amd64 and linux/arm64
