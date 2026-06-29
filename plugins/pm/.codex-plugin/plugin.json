@@ -1,0 +1,22 @@
+{
+  "name": "pm",
+  "version": "1.0.2",
+  "description": "Spec-driven project management from requirements through GitHub Issue task decomposition",
+  "author": {
+    "name": "CodeMate"
+  },
+  "homepage": "https://github.com/BoringHappy/CodeMate",
+  "repository": "https://github.com/BoringHappy/CodeMate",
+  "license": "MIT",
+  "keywords": ["project-management", "spec", "planning", "issues"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Project Management",
+    "shortDescription": "Plan and deliver work through structured specifications.",
+    "longDescription": "CodeMate Project Management drives feature specifications from requirements and planning through task decomposition and completion.",
+    "developerName": "CodeMate",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": "Create or advance a specification for this feature."
+  }
+}

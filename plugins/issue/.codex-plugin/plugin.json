@@ -1,0 +1,22 @@
+{
+  "name": "issue",
+  "version": "1.0.2",
+  "description": "GitHub Issue workflow management with skills for reading, refining, triaging, and classifying issues",
+  "author": {
+    "name": "CodeMate"
+  },
+  "homepage": "https://github.com/BoringHappy/CodeMate",
+  "repository": "https://github.com/BoringHappy/CodeMate",
+  "license": "MIT",
+  "keywords": ["github", "issue", "triage", "workflow"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "GitHub Issues",
+    "shortDescription": "Read, refine, triage, and classify GitHub issues.",
+    "longDescription": "CodeMate GitHub Issues provides workflows for understanding, refining, labeling, and classifying project issues.",
+    "developerName": "CodeMate",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": "Triage the current GitHub issue."
+  }
+}

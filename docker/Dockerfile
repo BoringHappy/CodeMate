@@ -31,4 +31,4 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @cometix/ccline
 
 ENTRYPOINT ["/usr/local/bin/setup/setup.sh"]
-CMD ["/usr/local/bin/setup/run.sh"]
+CMD ["/usr/local/bin/setup/run-claude.sh"]

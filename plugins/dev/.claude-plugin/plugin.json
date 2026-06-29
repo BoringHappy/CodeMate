@@ -1,7 +1,7 @@
 {
   "name": "dev",
   "description": "Development utilities including environment variable key management, running container images as Kubernetes pods with injected local files, and general Kubernetes management",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": {
     "name": "CodeMate"
   }

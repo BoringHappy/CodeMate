@@ -1,8 +1,16 @@
 #!/bin/bash
 set -e
 
+SETUP_DIR="$(dirname "$0")"
+
 # Source common utilities
-source "$(dirname "$0")/shell/common.sh"
+source "$SETUP_DIR/shell/common.sh"
+
+# Launch-time checks and services run after image/repository setup succeeds.
+run_setup_script "$SETUP_DIR/shell/check-region.sh" "Running check-region.sh..."
+
+printf "${GREEN}Starting cron daemon...${RESET}\n"
+sudo service cron start || sudo cron || true
 
 # Configuration
 CLAUDE_SESSION="claude-code"
@@ -26,11 +34,11 @@ printf "${GREEN}Starting Claude Code in tmux session: $CLAUDE_SESSION${RESET}\n"
 # Choose system prompt based on workflow type
 if [ -n "$UPSTREAM_REPO_URL" ]; then
     # Open-source workflow: use opensource system prompt
-    SYSTEM_PROMPT_FILE="/usr/local/bin/setup/prompt/system_prompt_opensource.txt"
+    SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt_opensource.txt"
     printf "${CYAN}Using open-source workflow system prompt${RESET}\n"
 else
     # Standard workflow: use default system prompt
-    SYSTEM_PROMPT_FILE="/usr/local/bin/setup/prompt/system_prompt.txt"
+    SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt.txt"
     printf "${CYAN}Using standard workflow system prompt${RESET}\n"
 fi
 

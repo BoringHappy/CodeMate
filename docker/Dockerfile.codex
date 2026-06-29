@@ -1,0 +1,19 @@
+# CodeMate - Docker environment for Codex with automated Git/PR setup
+ARG BASE_IMAGE=ghcr.io/boringhappy/codemate-base:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Keep Codex entrypoints separate from the Claude Code entrypoints.
+COPY --chmod=755 setup /usr/local/bin/setup
+
+COPY --chown=agent:agent --chmod=644 tmux.conf /home/agent/.tmux.conf
+
+# Install Codex as the unprivileged runtime user. The standalone installer is
+# the installation method recommended by the Codex CLI documentation.
+USER agent
+RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh \
+    && codex --version
+
+ENTRYPOINT ["/usr/local/bin/setup/setup-codex.sh"]
+CMD ["/usr/local/bin/setup/run-codex.sh"]

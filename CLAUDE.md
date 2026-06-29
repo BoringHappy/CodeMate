@@ -32,12 +32,13 @@ Parameters:
 
 ### Container Startup Flow
 
-1. `setup/setup.sh` orchestrates initialization, running `setup/shell/check-region.sh` first. `CODEMATE_ALLOW_IP` takes precedence: when it is set, the script detects the public IP from `https://ifconfig.me/ip` and passes if it matches the IP allowlist — `http://ip-api.com/json/` is only queried as a fallback if `ifconfig.me` is unreachable. Only when `CODEMATE_ALLOW_IP` is unset does it query `http://ip-api.com/json/` and check the country/region against `CODEMATE_ALLOW_COUNTRY`. This avoids making both external calls. If the configured allowlist does not match, it files a GitHub issue and exits before any other setup runs
+1. `setup/setup.sh` runs shared initialization from `setup/shell/setup-common.sh`, then performs Claude-specific ccline and plugin setup. The Codex image uses `setup/setup-codex.sh`, which only runs the shared initialization.
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
-6. `setup/run.sh` launches Claude Code with system prompt from `setup/prompt/system_prompt.txt`
+6. `setup/run-claude.sh` and `setup/run-codex.sh` enforce the region restriction immediately before launching their agent. `CODEMATE_ALLOW_IP` takes precedence over `CODEMATE_ALLOW_COUNTRY`; failed checks file a GitHub issue and stop startup.
+7. `setup/run-claude.sh` starts the PR-monitor cron daemon and launches Claude Code with the appropriate system prompt. `setup/run-codex.sh` launches Codex.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 
@@ -119,8 +120,8 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 ### Key Files
 
 - `docker/Dockerfile` - Main container definition, uses `codemate-base` image
+- `docker/Dockerfile.codex` - Codex container definition, built as the `codemate-codex` image
 - `docker/Dockerfile.base` - Base image with system packages and development tools
-- `docker/Dockerfile.pure-claude` - Minimal Claude Code image
 - `docker/setup/` - Container setup scripts (copied into container at build time)
 - `codemate` - Main script to run CodeMate with configuration management (installed globally or run locally)
 - `docker/setup/python/setup-repo.py` - Main repo/PR setup logic, reads PR template from `.github/PULL_REQUEST_TEMPLATE.md`

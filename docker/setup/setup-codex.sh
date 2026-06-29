@@ -7,14 +7,10 @@ SETUP_DIR="/usr/local/bin/setup"
 source "$SETUP_DIR/shell/common.sh"
 source "$SETUP_DIR/shell/setup-common.sh"
 
-run_claude_setup() {
-    run_setup_script "$SETUP_DIR/python/setup-ccline.py" "Running setup-ccline.py..."
-    run_setup_script "$SETUP_DIR/shell/setup-plugins.sh" "Running setup-plugins.sh..."
-}
-
-run_common_setup "$SETUP_DIR" run_claude_setup
+# Claude-specific ccline and plugin setup remains in setup.sh.
+run_common_setup "$SETUP_DIR"
 
 printf "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-printf "${GREEN}✓ All setup scripts completed successfully${RESET}\n"
+printf "${GREEN}✓ Codex setup completed successfully${RESET}\n"
 printf "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 exec "$@"

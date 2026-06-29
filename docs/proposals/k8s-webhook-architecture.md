@@ -116,7 +116,7 @@ for admission webhooks).
   pod itself can **scale to zero between events**: the Claude session is bound to the PR and
   persisted to a shared PVC, so a reaped pod **resumes** that session (`claude --resume`) on the
   next event with full context — cheap to run, fast to wake (see §6.3).
-- One-PR-per-pod is kept on purpose. The pod runs the same Claude `tmux` session as today (`run.sh`),
+- One-PR-per-pod is kept on purpose. The pod runs the same Claude `tmux` session as today (`run-claude.sh`),
   resumed from disk rather than started cold.
 - A lightweight **delivery sidecar** consumes the PR's queue and, per message, waits for the
   session to be idle, then injects the message into the TUI via `tmux send-keys` using the
@@ -269,7 +269,7 @@ creates and works a PR), just hosted, persistent, and managed by the operator. *
 codemate --branch feature/x  [--repo ...] [--query "build X"]
         │  creates a PRSession CR in the cluster (instead of `docker run` locally)
         ▼
-operator reconciler: provision pod → run.sh → setup-repo.py creates branch + PR (today's logic)
+operator reconciler: provision pod → run-claude.sh → setup-repo.py creates branch + PR (today's logic)
         │  pull_request.opened (operator now tracks it like any PR)
         ▼
 normal PR loop (webhook events + `codemate attach --pr` → the live session)
@@ -341,7 +341,7 @@ GitHub        Operator (webhook + reconciler)   Queue        Sidecar        tmux
 ```
 
 For `pull_request.opened` the only difference is a first step: the webhook handler **creates** the
-`PRSession` CR, the reconciler boots the pod + tmux session (`run.sh`), then the description is
+`PRSession` CR, the reconciler boots the pod + tmux session (`run-claude.sh`), then the description is
 delivered as the seed message. For `pull_request.closed`/merged the handler **deletes** the
 `PRSession` CR and the reconciler garbage-collects the pod. If a webhook is ever missed, the
 operator's periodic GitHub resync converges the same end state.
@@ -440,7 +440,7 @@ those credentials — no per-pod login. Re-running the init pod refreshes/rotate
 Claude Code persists each conversation as a resumable **session** under `~/.claude/`. We store the
 PR's session on the PVC (keyed by `repo#pr`, recorded in `status.claudeSessionId`) so:
 
-- when a pod boots/wakes, `run.sh` starts Claude with `--resume <claudeSessionId>` instead of cold —
+- when a pod boots/wakes, `run-claude.sh` starts Claude with `--resume <claudeSessionId>` instead of cold —
   the full PR conversation context is restored from disk;
 - therefore the pod can be **scaled to zero after `idleTimeoutSeconds`** of no events and recreated
   on the next webhook, **without losing context** — turning the cost/context tradeoff of §3.1 into

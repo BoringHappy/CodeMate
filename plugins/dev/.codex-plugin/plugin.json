@@ -1,0 +1,22 @@
+{
+  "name": "dev",
+  "version": "2.0.1",
+  "description": "Development utilities for environment keys, container workloads, and Kubernetes management",
+  "author": {
+    "name": "CodeMate"
+  },
+  "homepage": "https://github.com/BoringHappy/CodeMate",
+  "repository": "https://github.com/BoringHappy/CodeMate",
+  "license": "MIT",
+  "keywords": ["development", "containers", "kubernetes", "environment"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Development Utilities",
+    "shortDescription": "Manage development environments and Kubernetes workloads.",
+    "longDescription": "CodeMate Development Utilities provides workflows for environment keys, running container images, and managing Kubernetes resources.",
+    "developerName": "CodeMate",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": "Help me manage this development environment."
+  }
+}
