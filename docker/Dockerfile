@@ -30,7 +30,8 @@ USER agent
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @cometix/ccline
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh \
-    && codex --version
+    && sudo ln -sf /home/agent/.local/bin/codex /usr/local/bin/codex \
+    && /usr/local/bin/codex --version
 
 ENTRYPOINT ["/usr/local/bin/setup/setup.sh"]
 CMD ["/usr/local/bin/setup/run.sh"]
