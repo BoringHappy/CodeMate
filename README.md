@@ -2,9 +2,9 @@
 
 English | [简体中文](README_CN.md)
 
-Docker-based Claude Code environment with automated Git/PR setup.
+Docker-based Claude Code and Codex environment with automated Git/PR setup.
 
-> **⚠️ Security Notice:** This container runs with `--dangerously-skip-permissions` by default, allowing Claude to execute commands without confirmation. Use only in isolated environments with trusted repositories.
+> **⚠️ Security Notice:** This container runs the selected agent without approval prompts. Use only in isolated environments with trusted repositories.
 
 ## Why CodeMate?
 
@@ -75,6 +75,10 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 # Run with branch name (auto-detects repo from: --repo > .env > current directory's git remote)
 codemate --branch feature/your-branch
 
+# Run Codex instead of the default Claude runtime
+echo 'CODEMATE_AGENT=codex' >> .env
+codemate --branch feature/your-branch
+
 # Run with a custom PR title
 codemate --branch feature/your-branch --pr-title "My feature title"
 
@@ -134,7 +138,7 @@ Use `--mount <host-path>:<container-path>` to mount additional directories or fi
 For development or customization, you can build CodeMate from a local Dockerfile:
 
 ```bash
-# Build from default Dockerfile in current directory
+# Build from the default Claude Dockerfile
 codemate --build --branch feature/xyz
 
 # Build from custom Dockerfile path
@@ -207,11 +211,12 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `GIT_USER_NAME` | Auto | Git commit author name (defaults to `git config user.name` if not provided) |
 | `GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
+| `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
 | `SLACK_WEBHOOK` | No | Slack Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
 | `LARK_WEBHOOK` | No | Lark Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
 | `ANTHROPIC_AUTH_TOKEN` | No | Anthropic API token (for custom API endpoints) |
 | `ANTHROPIC_BASE_URL` | No | Anthropic API base URL (for custom API endpoints) |
-| `QUERY` | No | Initial query to send to Claude after startup |
+| `QUERY` | No | Initial query to send to the selected agent after startup |
 | `DEFAULT_MARKETPLACES` | No | Comma-separated default plugin marketplaces (default: `BoringHappy/CodeMate`) |
 | `DEFAULT_PLUGINS` | No | Comma-separated default plugins (default: `git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`) |
 | `CUSTOM_MARKETPLACES` | No | Comma-separated list of custom plugin marketplace repositories (e.g., `username/repo1,org/repo2`) |
@@ -226,12 +231,12 @@ CodeMate uses a separate [base image (`codemate-base`)](https://github.com/Borin
 On startup, the container:
 1. Configures git user from environment variables
 2. Authenticates GitHub CLI with token
-3. Installs/updates plugins from configured marketplaces
-4. Clones/updates repository to `/home/agent/<repo-name>`
-5. Checks out specified branch or PR
-6. Creates a draft PR if working on a new branch (unless `--no-pr` or fork workflow)
-7. Starts Claude Code in a tmux session with `--dangerously-skip-permissions` flag
-8. Sends initial query to Claude if `--query` is provided
+3. Clones/updates repository to `/home/agent/<repo-name>`
+4. Checks out the specified branch or PR
+5. Creates a draft PR if working on a new branch (unless `--no-pr` or fork workflow)
+6. Installs/updates plugins for the selected agent from configured marketplaces
+7. Starts Claude Code or Codex in the matching tmux session
+8. Sends the initial query to the selected agent if `--query` is provided
 9. Runs a cron job every minute to monitor the PR for new comments, CI failures, and review-ready state
 
 ## Skills

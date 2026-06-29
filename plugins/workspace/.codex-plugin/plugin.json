@@ -1,0 +1,22 @@
+{
+  "name": "workspace",
+  "version": "1.0.2",
+  "description": "CodeMate workspace utilities for repository setup and best-practice configuration",
+  "author": {
+    "name": "CodeMate"
+  },
+  "homepage": "https://github.com/BoringHappy/CodeMate",
+  "repository": "https://github.com/BoringHappy/CodeMate",
+  "license": "MIT",
+  "keywords": ["workspace", "repository", "setup", "workflow"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Workspace",
+    "shortDescription": "Configure repository workflow best practices.",
+    "longDescription": "CodeMate Workspace provides reusable repository setup and best-practice workflows for development teams.",
+    "developerName": "CodeMate",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": "Set up repository workflow best practices."
+  }
+}

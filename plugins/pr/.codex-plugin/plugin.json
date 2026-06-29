@@ -1,0 +1,22 @@
+{
+  "name": "pr",
+  "version": "1.0.4",
+  "description": "GitHub Pull Request workflow management with skills for creating, updating, and managing PRs",
+  "author": {
+    "name": "CodeMate"
+  },
+  "homepage": "https://github.com/BoringHappy/CodeMate",
+  "repository": "https://github.com/BoringHappy/CodeMate",
+  "license": "MIT",
+  "keywords": ["github", "pull-request", "pr", "review"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Pull Requests",
+    "shortDescription": "Create, update, and manage GitHub pull requests.",
+    "longDescription": "CodeMate Pull Requests provides workflows for creating PRs, updating their metadata, and addressing review feedback.",
+    "developerName": "CodeMate",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": "Create or update the pull request for my changes."
+  }
+}

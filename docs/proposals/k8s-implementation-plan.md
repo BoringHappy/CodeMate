@@ -33,9 +33,9 @@ effort → decisions.
 | Message queue | **New** (Redis Streams / NATS) | replaces `/tmp/pr-monitor-state` |
 | Shared Claude-auth PVC (`~/.claude`, `~/.claude.json`) | **New** (RWX) | replaces per-container Claude login |
 | Claude auth init pod | **New** (one-time `claude login` via `kubectl exec`) | — |
-| PR-bound Claude session store + resume | **New** | `run.sh` gains `claude --resume` |
+| PR-bound Claude session store + resume | **New** | `run-claude.sh` gains `claude --resume` |
 | Agent pod image | **Modify** | `docker/Dockerfile`, `docker/setup/*` (drop cron) |
-| Tmux launch + injection | **Reuse** | `docker/setup/run.sh`, `common.sh::send_and_verify_command` |
+| Tmux launch + injection | **Reuse** | `docker/setup/run-claude.sh`, `common.sh::send_and_verify_command` |
 | Idle/commit hooks | **Reuse** | `plugins/workspace/hooks/*` |
 | Repo/branch/PR bootstrap | **Reuse/extend** | `docker/setup/python/setup-repo.py` |
 | `codemate` launcher (cluster mode → create `PRSession`) | **Modify** | `codemate` (keeps local `docker run` as back-compat) |
@@ -80,7 +80,7 @@ CodeMate/
 
 ### Conventions for the monorepo
 - **Separate CI:** add a workflow that runs the operator's Python tests/lint only on `operator/`
-  changes; the existing `docker-build-push.yml` keeps owning the image.
+  changes; the existing `docker-build.yml` keeps owning the image.
 - **Independent versioning:** tag the operator/chart with a prefix (e.g. `operator/v0.1.0`,
   `chart/v0.1.0`) so release cadence is decoupled from the image without separate repos.
 - **Plugin version-bump rule** (`.claude/rules/plugin-version-bump.md`) still applies to any
@@ -105,9 +105,9 @@ The single normalized envelope the operator produces and the sidecar consumes. T
   "kind": "review_comment",                  // enum, see table B
   "actor": "alice",                          // event sender login
   "createdAt": "2026-06-07T10:32:00Z",
-  "prompt": "PR review comment from @alice on docker/run.sh:42:\n\"...\"",
+  "prompt": "PR review comment from @alice on docker/setup/run-claude.sh:42:\n\"...\"",
   "followup": "/pr:ack-comments",            // optional skill to run after prompt settles
-  "ref": { "commentId": 12345, "path": "docker/run.sh", "line": 42 }
+  "ref": { "commentId": 12345, "path": "docker/setup/run-claude.sh", "line": 42 }
 }
 ```
 
@@ -220,7 +220,7 @@ async def handle_webhook(request):
       messages until they detach (human has priority over the webhook path).
 - [ ] **Remove cron**: delete the crontab entry and `monitor-pr.sh` invocation from
       `docker/setup/setup.sh` / image; port its formatting logic into the operator's event mapper.
-- [ ] Keep `run.sh`, the workspace hooks, and all skills untouched.
+- [ ] Keep `run-claude.sh`, the workspace hooks, and all skills untouched.
 
 Reference shape (`operator/sidecar/loop.py`) — this is `monitor-pr.sh`'s "act only when Stopped,
 send one, verify" logic, event-driven:
@@ -313,7 +313,7 @@ other half of the backstop (catches missed `pull_request.opened`).
 ### 2.4 PR-bound Claude session (foundation for scale-to-zero)
 - [ ] On first run, capture the Claude session id and record it in `PRSession.status.claudeSessionId`;
       store the session blob under a per-PR subdir on the PVC (avoids cross-pod contention).
-- [ ] Modify `run.sh` to start with `claude --resume <claudeSessionId>` when one exists, else cold.
+- [ ] Modify `run-claude.sh` to start with `claude --resume <claudeSessionId>` when one exists, else cold.
 - [ ] On PR close/merge, delete the PR's session blob alongside the pod.
 
 ### 2.5 `codemate` CLI cluster mode (proposal §5.2)
@@ -353,7 +353,7 @@ other half of the backstop (catches missed `pull_request.opened`).
 ### 3.3 Idle scale-to-zero via session resume (proposal §6.3)
 - [ ] Reconciler watches `status.sessionStatus` + queue depth; after `spec.idleTimeoutSeconds` with
       no work, scale the pod to zero and set `status.scaledToZero=true` (keep the `PRSession`).
-- [ ] On the next event, wake the pod; `run.sh` resumes from `claudeSessionId` so context is intact.
+- [ ] On the next event, wake the pod; `run-claude.sh` resumes from `claudeSessionId` so context is intact.
 - [ ] Tune `idleTimeoutSeconds` default; ensure wake latency (pull image + resume) is acceptable.
 
 ### 3.4 Quotas / cost control

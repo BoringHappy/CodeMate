@@ -1,4 +1,4 @@
-# CodeMate - Docker environment for Claude Code with automated Git/PR setup
+# CodeMate - Docker environment for Claude Code and Codex
 # Uses the base image which contains system packages and development tools
 ARG BASE_IMAGE=ghcr.io/boringhappy/codemate-base:latest
 FROM ${BASE_IMAGE}
@@ -25,10 +25,12 @@ RUN echo "* * * * * agent /usr/local/bin/setup/shell/monitor-pr.sh >> /tmp/pr-mo
 ENV DEFAULT_MARKETPLACES="BoringHappy/CodeMate"
 ENV DEFAULT_PLUGINS="git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
-# Switch to agent user and install Claude Code
+# Switch to agent user and install both supported coding agents.
 USER agent
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @cometix/ccline
+RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh \
+    && codex --version
 
 ENTRYPOINT ["/usr/local/bin/setup/setup.sh"]
 CMD ["/usr/local/bin/setup/run.sh"]

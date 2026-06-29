@@ -1,7 +1,7 @@
 {
   "name": "issue",
   "description": "GitHub Issue workflow management plugin with skills for reading, refining, triaging, and classifying issues",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": {
     "name": "CodeMate"
   },

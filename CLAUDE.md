@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CodeMate is a Docker-based environment for running Claude Code with automated Git/PR setup. It runs Claude with `--dangerously-skip-permissions` in an isolated container, enabling AI pair programming without constant approval prompts.
+CodeMate is a Docker-based environment for running Claude Code or Codex with automated Git/PR setup. The merged image selects its runtime from `CODEMATE_AGENT` and runs it without approval prompts inside an isolated container.
 
 ## Running CodeMate
 
@@ -32,12 +32,13 @@ Parameters:
 
 ### Container Startup Flow
 
-1. `setup/setup.sh` orchestrates initialization, running `setup/shell/check-region.sh` first. `CODEMATE_ALLOW_IP` takes precedence: when it is set, the script detects the public IP from `https://ifconfig.me/ip` and passes if it matches the IP allowlist — `http://ip-api.com/json/` is only queried as a fallback if `ifconfig.me` is unreachable. Only when `CODEMATE_ALLOW_IP` is unset does it query `http://ip-api.com/json/` and check the country/region against `CODEMATE_ALLOW_COUNTRY`. This avoids making both external calls. If the configured allowlist does not match, it files a GitHub issue and exits before any other setup runs
+1. The combined image uses `setup/setup.sh` for shared Git, GitHub, repository, pre-commit, and soft-link initialization.
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
-6. `setup/run.sh` launches Claude Code with system prompt from `setup/prompt/system_prompt.txt`
+6. `setup/setup.sh` enforces the region restriction before any other setup. `CODEMATE_ALLOW_IP` takes precedence over `CODEMATE_ALLOW_COUNTRY`; failed checks file a GitHub issue and stop startup.
+7. `setup/run.sh` starts the PR-monitor cron daemon and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 
@@ -118,9 +119,8 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 
 ### Key Files
 
-- `docker/Dockerfile` - Main container definition, uses `codemate-base` image
+- `docker/Dockerfile` - Combined Claude Code and Codex container definition, using the `codemate-base` image
 - `docker/Dockerfile.base` - Base image with system packages and development tools
-- `docker/Dockerfile.pure-claude` - Minimal Claude Code image
 - `docker/setup/` - Container setup scripts (copied into container at build time)
 - `codemate` - Main script to run CodeMate with configuration management (installed globally or run locally)
 - `docker/setup/python/setup-repo.py` - Main repo/PR setup logic, reads PR template from `.github/PULL_REQUEST_TEMPLATE.md`
@@ -128,5 +128,6 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 ## Development Notes
 
 - No test suite exists - this is infrastructure/tooling
-- GitHub Actions workflow (`docker-build-push.yml`) builds and pushes to GHCR on main branch and tags
+- GitHub Actions workflow (`docker-build.yml`) builds and pushes the combined image to GHCR on main branch and tags
+- GitHub Actions workflow (`docker-build-schedule.yml`) triggers a rebuild every day at 05:00 UTC
 - Multi-platform builds: linux/amd64 and linux/arm64

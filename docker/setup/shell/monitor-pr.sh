@@ -24,7 +24,22 @@ exec 200>"$LOCK_FILE"
 flock -n 200 || { echo "$(date): Already running, skipping"; exit 0; }
 
 # Configuration (can be overridden via environment variables)
-CLAUDE_SESSION="${CLAUDE_SESSION:-claude-code}"
+CODEMATE_AGENT="${CODEMATE_AGENT:-claude}"
+case "$CODEMATE_AGENT" in
+    claude)
+        AGENT_NAME="Claude"
+        DEFAULT_AGENT_SESSION="claude-code"
+        ;;
+    codex)
+        AGENT_NAME="Codex"
+        DEFAULT_AGENT_SESSION="codex"
+        ;;
+    *)
+        echo "Unsupported CODEMATE_AGENT: $CODEMATE_AGENT"
+        exit 1
+        ;;
+esac
+AGENT_SESSION="${AGENT_SESSION:-${CLAUDE_SESSION:-$DEFAULT_AGENT_SESSION}}"
 STATE_FILE="${STATE_FILE:-/tmp/pr-monitor-state}"
 
 # Derive repo directory from GIT_REPO_URL (e.g., https://github.com/org/repo.git -> /home/agent/repo)
@@ -39,8 +54,18 @@ session_exists() {
     tmux has-session -t "$1" 2>/dev/null
 }
 
-# Function to check if Claude session is stopped
-is_session_stopped() {
+# Check whether the selected agent can accept another prompt. Claude exposes
+# lifecycle state through its workspace hook. Codex accepts queued follow-ups,
+# so an existing tmux session is sufficient.
+is_agent_ready() {
+    if ! session_exists "$AGENT_SESSION"; then
+        return 1
+    fi
+
+    if [ "$CODEMATE_AGENT" = "codex" ]; then
+        return 0
+    fi
+
     local status_file="/tmp/.session_status"
     if [ -f "$status_file" ]; then
         local last_line=$(tail -n 10 "$status_file" | grep -v '^$' | tail -n 1)
@@ -49,6 +74,20 @@ is_session_stopped() {
         fi
     fi
     return 1
+}
+
+# Claude hook state supports submission verification and retries. Codex has no
+# equivalent status file here, so send its follow-up exactly once.
+send_to_agent() {
+    local message="$1"
+
+    if [ "$CODEMATE_AGENT" = "codex" ]; then
+        tmux send-keys -t "$AGENT_SESSION" "$message"
+        tmux send-keys -t "$AGENT_SESSION" Enter
+        return 0
+    fi
+
+    send_and_verify_command "$AGENT_SESSION" "$message" 3
 }
 
 # Load state from previous run
@@ -139,7 +178,7 @@ check_pr_comments() {
     return 1
 }
 
-# Check for new Issue Comments (pure PR comments) and send content to Claude
+# Check for new Issue Comments (pure PR comments) and send content to the agent
 check_issue_comments() {
     local pr_number="$1"
 
@@ -183,9 +222,13 @@ check_issue_comments() {
 
         echo "$(date): Processing issue comment #$comment_id from $comment_user"
 
-        if session_exists "$CLAUDE_SESSION"; then
-            # Send the comment content to Claude with instruction to acknowledge
-            send_and_verify_command "$CLAUDE_SESSION" "PR Comment from $comment_user: $comment_body (After addressing, use /pr:ack-comments skill to add 👀 reaction)" 3
+        if session_exists "$AGENT_SESSION"; then
+            if [ "$CODEMATE_AGENT" = "claude" ]; then
+                ack_instruction="use /pr:ack-comments skill"
+            else
+                ack_instruction="use the pr plugin's ack-comments skill"
+            fi
+            send_to_agent "PR Comment from $comment_user: $comment_body (After addressing, $ack_instruction to add 👀 reaction)"
             LAST_ISSUE_COMMENT_ID="$comment_id"
             return 1  # Signal that we sent a comment
         fi
@@ -232,9 +275,14 @@ check_pr_ready_for_review() {
     fi
 
     # PR is ready for review and doesn't have the label
-    echo "$(date): PR is ready for review, notifying Claude"
-    if session_exists "$CLAUDE_SESSION"; then
-        send_and_verify_command "$CLAUDE_SESSION" "The PR is now ready for review. Please use /pr:update skill to update the PR title and description based on all changes made." 3
+    echo "$(date): PR is ready for review, notifying $AGENT_NAME"
+    if session_exists "$AGENT_SESSION"; then
+        if [ "$CODEMATE_AGENT" = "claude" ]; then
+            update_instruction="use /pr:update skill"
+        else
+            update_instruction="use the pr plugin's update skill"
+        fi
+        send_to_agent "The PR is now ready for review. Please $update_instruction to update the PR title and description based on all changes made."
         READY_FOR_REVIEW_NOTIFIED="true"
         return 1  # Signal that we sent a notification
     fi
@@ -242,7 +290,7 @@ check_pr_ready_for_review() {
     return 0
 }
 
-# Check for CI failures and notify Claude
+# Check for CI failures and notify the selected agent
 check_ci_status() {
     local pr_number="$1"
 
@@ -340,7 +388,12 @@ check_ci_status() {
     local failure_logs=""
     failure_logs=$(gh run view "$run_id" --log-failed 2>/dev/null | tail -100)
 
-    if session_exists "$CLAUDE_SESSION"; then
+    if session_exists "$AGENT_SESSION"; then
+        if [ "$CODEMATE_AGENT" = "claude" ]; then
+            commit_instruction="using /git:commit skill"
+        else
+            commit_instruction="using the git plugin's commit skill"
+        fi
         local message="CI check failed for this PR. Please analyze and fix the issue.
 
 Workflow: $run_name
@@ -351,9 +404,9 @@ Recent failure logs:
 $failure_logs
 \`\`\`
 
-Please fix the CI failure and commit the changes using /git:commit skill."
+Please fix the CI failure and commit the changes $commit_instruction."
 
-        send_and_verify_command "$CLAUDE_SESSION" "$message" 3
+        send_to_agent "$message"
         CI_FAILURE_NOTIFIED="true"
         LAST_CI_CHECK_COMMIT="$current_commit"
         return 1  # Signal that we sent a notification
@@ -368,9 +421,9 @@ main() {
 
     load_state
 
-    # Check if Claude session is stopped (only act when stopped)
-    if ! is_session_stopped; then
-        echo "$(date): Claude is busy, skipping"
+    # Check whether the selected agent can accept a follow-up.
+    if ! is_agent_ready; then
+        echo "$(date): $AGENT_NAME session is not ready, skipping"
         cleanup_and_exit
     fi
 
@@ -388,7 +441,7 @@ main() {
 
     # If we sent a CI failure notification, skip other checks this run
     if [ "$ci_failure_sent" -eq 1 ]; then
-        echo "$(date): CI failure notification sent to Claude, skipping other checks"
+        echo "$(date): CI failure notification sent to $AGENT_NAME, skipping other checks"
         cleanup_and_exit
     fi
 
@@ -398,7 +451,7 @@ main() {
 
     # If we sent a ready-for-review notification, skip other checks this run
     if [ "$ready_for_review_sent" -eq 1 ]; then
-        echo "$(date): Ready-for-review notification sent to Claude, skipping other checks"
+        echo "$(date): Ready-for-review notification sent to $AGENT_NAME, skipping other checks"
         cleanup_and_exit
     fi
 
@@ -414,7 +467,7 @@ main() {
 
     # If we sent an issue comment, skip review comments check this run
     if [ "$issue_comment_sent" -eq 1 ]; then
-        echo "$(date): Issue comment sent to Claude, skipping review comments check"
+        echo "$(date): Issue comment sent to $AGENT_NAME, skipping review comments check"
         cleanup_and_exit
     fi
 
@@ -428,19 +481,23 @@ main() {
 
     if [ "$unsolved_count" -gt 0 ]; then
         echo "$(date): Unsolved PR comments detected ($unsolved_count)"
-        if session_exists "$CLAUDE_SESSION"; then
-            # Format comment details for Claude
+        if session_exists "$AGENT_SESSION"; then
+            # Format comment details for the selected agent.
             comment_summary=$(echo "$comments_data" | jq -r '
                 map(
                     "- \(.path):\(.line // .original_line) by @\(.user.login):\n  \(.body | split("\n") | join("\n  "))"
                 ) | join("\n\n")
             ')
 
-            # Send command with comment context
-            local message="Please use /fix-comments skill to address the following PR review comments:
+            if [ "$CODEMATE_AGENT" = "claude" ]; then
+                fix_instruction="use /pr:fix-comments skill"
+            else
+                fix_instruction="use the pr plugin's fix-comments skill"
+            fi
+            local message="Please $fix_instruction to address the following PR review comments:
 
 $comment_summary"
-            send_and_verify_command "$CLAUDE_SESSION" "$message" 3
+            send_to_agent "$message"
         fi
         LAST_CHECK_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     fi

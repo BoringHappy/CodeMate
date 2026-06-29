@@ -1,0 +1,22 @@
+{
+  "name": "git",
+  "version": "1.0.2",
+  "description": "Git workflow management tools for staging, committing, and pushing changes",
+  "author": {
+    "name": "CodeMate"
+  },
+  "homepage": "https://github.com/BoringHappy/CodeMate",
+  "repository": "https://github.com/BoringHappy/CodeMate",
+  "license": "MIT",
+  "keywords": ["git", "commit", "push", "workflow"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Git Workflows",
+    "shortDescription": "Stage, commit, and push repository changes.",
+    "longDescription": "CodeMate Git provides reusable workflows for safely staging, committing, and pushing repository changes.",
+    "developerName": "CodeMate",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": "Commit and push my current changes."
+  }
+}
