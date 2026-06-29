@@ -134,7 +134,7 @@ Use `--mount <host-path>:<container-path>` to mount additional directories or fi
 For development or customization, you can build CodeMate from a local Dockerfile:
 
 ```bash
-# Build from default Dockerfile in current directory
+# Build from the default Claude Dockerfile
 codemate --build --branch feature/xyz
 
 # Build from custom Dockerfile path
@@ -149,7 +149,7 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
 
 **Options:**
 - `--build` - Build Docker image from local Dockerfile before running
-- `-f, --dockerfile PATH` - Path to Dockerfile (default: `docker/Dockerfile`)
+- `-f, --dockerfile PATH` - Path to Dockerfile (default: `docker/Dockerfile.claude`)
 - `--tag TAG` - Image tag for local build (default: `codemate:local`)
   - **Note:** Only works with `--build`. To use a pre-built image, use `--image` instead
 

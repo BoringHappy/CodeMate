@@ -123,7 +123,7 @@ codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:la
 对于开发或自定义，你可以从本地 Dockerfile 构建 CodeMate：
 
 ```bash
-# 从当前目录的默认 Dockerfile 构建
+# 从默认的 Claude Dockerfile 构建
 codemate --build --branch feature/xyz
 
 # 从自定义 Dockerfile 路径构建
@@ -138,7 +138,7 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
 
 **选项：**
 - `--build` - 运行前从本地 Dockerfile 构建 Docker image
-- `-f, --dockerfile PATH` - Dockerfile 路径（默认：`docker/Dockerfile`）
+- `-f, --dockerfile PATH` - Dockerfile 路径（默认：`docker/Dockerfile.claude`）
 - `--tag TAG` - 本地构建的 image tag（默认：`codemate:local`）
   - **注意：** 仅与 `--build` 一起使用。要使用预构建 image，请使用 `--image`
 

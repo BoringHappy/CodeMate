@@ -119,7 +119,7 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 
 ### Key Files
 
-- `docker/Dockerfile` - Main container definition, uses `codemate-base` image
+- `docker/Dockerfile.claude` - Claude Code container definition, uses the `codemate-base` image
 - `docker/Dockerfile.codex` - Codex container definition, built as the `codemate-codex` image
 - `docker/Dockerfile.base` - Base image with system packages and development tools
 - `docker/setup/` - Container setup scripts (copied into container at build time)
