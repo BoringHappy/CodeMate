@@ -22,6 +22,7 @@ CODEMATE_ISSUE_NUMBER=""
 CODEMATE_QUERY=""
 CODEMATE_NO_PR=""
 CODEMATE_AGENT="${CODEMATE_AGENT:-}"
+CODEMATE_CLI_AGENT=""
 DOCKER_EXTRA_PARAMS=()
 CODEMATE_IMAGE="${CODEMATE_IMAGE:-ghcr.io/boringhappy/codemate:latest}"
 BUILD_LOCAL=false
@@ -343,7 +344,7 @@ run_codemate() {
     local launcher_issue_number="$CODEMATE_ISSUE_NUMBER"
     local launcher_query="$CODEMATE_QUERY"
     local launcher_no_pr="$CODEMATE_NO_PR"
-    local launcher_agent="$CODEMATE_AGENT"
+    local launcher_agent="$CODEMATE_CLI_AGENT"
 
     # Source .env file from current directory (project-specific)
     if [ -f "$current_dir/.env" ]; then
@@ -707,7 +708,7 @@ main() {
                 fi
                 case "$2" in
                     claude|codex)
-                        CODEMATE_AGENT="$2"
+                        CODEMATE_CLI_AGENT="$2"
                         ;;
                     *)
                         print_error "Invalid --agent value: $2"
