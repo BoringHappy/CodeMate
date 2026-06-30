@@ -51,7 +51,7 @@ At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set â
 
 ### Plugin Marketplace
 
-CodeMate uses the CodeMatePlugin marketplace to distribute plugins. Plugins are installed at runtime during container startup via `setup/shell/setup-plugins.sh` using the `claude plugin` CLI commands.
+CodeMate uses the CodeMatePlugin marketplace to distribute plugins. Claude plugins are installed at runtime during container startup via `setup/shell/setup-claude-plugins.sh` using the `claude plugin` CLI commands.
 
 The marketplace is fetched from the external repository: `BoringHappy/CodeMatePlugin`
 
