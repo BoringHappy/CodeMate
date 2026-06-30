@@ -45,21 +45,23 @@ On macOS, you need a Docker runtime since Docker doesn't run natively. Choose on
 
 #### Global Installation (Recommended)
 
-Install `codemate` globally to use it from anywhere:
+Install the Python CLI globally with `uv`:
 
 ```bash
-# Install directly to /usr/local/bin (requires sudo)
-sudo curl -fsSL https://raw.githubusercontent.com/BoringHappy/CodeMate/main/codemate -o /usr/local/bin/codemate && sudo chmod +x /usr/local/bin/codemate
+# Recommended
+uv tool install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 
-# Or install to ~/.local/bin without sudo (ensure ~/.local/bin is in your PATH)
-curl -fsSL https://raw.githubusercontent.com/BoringHappy/CodeMate/main/codemate -o ~/.local/bin/codemate && chmod +x ~/.local/bin/codemate
+# Alternative if you use pipx
+pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 
 # One-time global setup
 codemate --setup
 
 # Update to latest version
-codemate --update
+uv tool upgrade codemate-cli
 ```
+
+The legacy shell launcher remains at the repository root for compatibility; new CLI work lives in `cli/`.
 
 ### Usage
 
@@ -76,8 +78,7 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 codemate --branch feature/your-branch
 
 # Run Codex instead of the default Claude runtime
-echo 'CODEMATE_AGENT=codex' >> .env
-codemate --branch feature/your-branch
+codemate --branch feature/your-branch --agent codex
 
 # Run with a custom PR title
 codemate --branch feature/your-branch --pr-title "My feature title"
@@ -198,6 +199,15 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 > **Note:** When using `codemate`, these variables are handled automatically through the setup process. This reference is primarily for advanced Docker usage or troubleshooting.
 
+The `codemate` launcher resolves configuration in this order:
+
+1. Command-line options, such as `--repo`, `--branch`, `--agent`, `--mount`, and `--docker-param`
+2. Project `.env`
+3. Ambient shell environment variables
+4. Command-derived values and built-in defaults, such as `git config user.name`, `gh auth token`, and the current repo remote
+
+Docker receives generated environment values from that resolved configuration; the project `.env` file is not passed through directly.
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `CODEMATE_GIT_REPO_URL` | No | Repository URL (defaults to current repo's remote) |
@@ -217,7 +227,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
-`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` are created by the `codemate` launcher from CLI options and passed into the container; do not set them directly in `.env`.
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run.
 
 
 ## How It Works
