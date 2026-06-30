@@ -8,11 +8,12 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-import click
+import typer
 
 
 DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
@@ -24,6 +25,13 @@ GREEN = "\033[0;32m"
 YELLOW = "\033[0;33m"
 RED = "\033[0;31m"
 NC = "\033[0m"
+
+app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
+
+
+class Agent(str, Enum):
+    claude = "claude"
+    codex = "codex"
 
 
 @dataclass(frozen=True)
@@ -461,50 +469,29 @@ def run_codemate(args: SimpleNamespace) -> None:
             pass
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--setup", is_flag=True, help="Create configuration files.")
-@click.option("--update", is_flag=True, help="Show update instructions.")
-@click.option("--branch", help="Branch name to work on.")
-@click.option("--pr", help="Existing PR number to work on.")
-@click.option("--pr-title", help="PR title.")
-@click.option("--issue", help="GitHub issue number to work on.")
-@click.option("--query", help="Initial query to send to the selected agent.")
-@click.option("--agent", type=click.Choice(["claude", "codex"]), help="Runtime agent.")
-@click.option("--no-pr", is_flag=True, help="Skip PR creation and branch push.")
-@click.option("--docker-param", multiple=True, help="Extra Docker run parameter.")
-@click.option("--repo", help="Git repository URL.")
-@click.option("--upstream", help="Upstream repository URL.")
-@click.option("--mount", multiple=True, help="Custom volume mount.")
-@click.option("--image", help=f"Docker image to use. Default: {DEFAULT_IMAGE}")
-@click.option("--build", "build_image_flag", is_flag=True, help="Build Docker image from local Dockerfile.")
-@click.option("-f", "--dockerfile", default="docker/Dockerfile", show_default=True, help="Path to Dockerfile.")
-@click.option("--tag", help="Image tag for local build.")
-@click.option("--env", "env_values", multiple=True, help="Extra container env KEY=VALUE.")
-@click.option("--env-file", "env_files", multiple=True, help="Additional env file to merge.")
-@click.option("--config", "show_config", is_flag=True, help="Print resolved config with sources.")
-@click.option("--dry-run", is_flag=True, help="Print Docker command without running it.")
+@app.callback(invoke_without_command=True)
 def cli(
-    setup: bool,
-    update: bool,
-    branch: Optional[str],
-    pr: Optional[str],
-    pr_title: Optional[str],
-    issue: Optional[str],
-    query: Optional[str],
-    agent: Optional[str],
-    no_pr: bool,
-    docker_param: Tuple[str, ...],
-    repo: Optional[str],
-    upstream: Optional[str],
-    mount: Tuple[str, ...],
-    image: Optional[str],
-    build_image_flag: bool,
-    dockerfile: str,
-    tag: Optional[str],
-    env_values: Tuple[str, ...],
-    env_files: Tuple[str, ...],
-    show_config: bool,
-    dry_run: bool,
+    setup: bool = typer.Option(False, "--setup", help="Create configuration files."),
+    update: bool = typer.Option(False, "--update", help="Show update instructions."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Branch name to work on."),
+    pr: Optional[str] = typer.Option(None, "--pr", help="Existing PR number to work on."),
+    pr_title: Optional[str] = typer.Option(None, "--pr-title", help="PR title."),
+    issue: Optional[str] = typer.Option(None, "--issue", help="GitHub issue number to work on."),
+    query: Optional[str] = typer.Option(None, "--query", help="Initial query to send to the selected agent."),
+    agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent."),
+    no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push."),
+    docker_param: List[str] = typer.Option([], "--docker-param", help="Extra Docker run parameter."),
+    repo: Optional[str] = typer.Option(None, "--repo", help="Git repository URL."),
+    upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
+    mount: List[str] = typer.Option([], "--mount", help="Custom volume mount."),
+    image: Optional[str] = typer.Option(None, "--image", help=f"Docker image to use. Default: {DEFAULT_IMAGE}"),
+    build_image_flag: bool = typer.Option(False, "--build", help="Build Docker image from local Dockerfile."),
+    dockerfile: str = typer.Option("docker/Dockerfile", "-f", "--dockerfile", help="Path to Dockerfile."),
+    tag: Optional[str] = typer.Option(None, "--tag", help="Image tag for local build."),
+    env_values: List[str] = typer.Option([], "--env", help="Extra container env KEY=VALUE."),
+    env_files: List[str] = typer.Option([], "--env-file", help="Additional env file to merge."),
+    show_config: bool = typer.Option(False, "--config", help="Print resolved config with sources."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print Docker command without running it."),
 ) -> None:
     args = SimpleNamespace(
         setup=setup,
@@ -514,31 +501,37 @@ def cli(
         pr_title=pr_title,
         issue=issue,
         query=query,
-        agent=agent,
+        agent=agent.value if agent else None,
         no_pr=no_pr,
-        docker_param=list(docker_param),
+        docker_param=docker_param,
         repo=repo,
         upstream=upstream,
-        mount=list(mount),
+        mount=mount,
         image=image,
         build=build_image_flag,
         dockerfile=dockerfile,
         tag=tag,
-        env=list(env_values),
-        env_file=list(env_files),
+        env=env_values,
+        env_file=env_files,
         config=show_config,
         dry_run=dry_run,
     )
     try:
         run_codemate(args)
     except subprocess.CalledProcessError as exc:
-        raise click.ClickException(f"Command failed with exit code {exc.returncode}: {' '.join(exc.cmd)}") from exc
+        typer.secho(
+            f"Error: Command failed with exit code {exc.returncode}: {' '.join(exc.cmd)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(exc.returncode) from exc
     except SystemExit as exc:
         if isinstance(exc.code, str):
-            raise click.ClickException(exc.code) from exc
+            typer.secho(f"Error: {exc.code}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from exc
         if exc.code:
-            raise
+            raise typer.Exit(int(exc.code)) from exc
 
 
 if __name__ == "__main__":
-    cli()
+    app()
