@@ -43,13 +43,13 @@ fi
 tmux new-session -d -s "$CLAUDE_SESSION" "claude --dangerously-skip-permissions --append-system-prompt \"\$(cat $SYSTEM_PROMPT_FILE)\""
 
 # Send initial query if provided
-if [ -n "$QUERY" ]; then
+if [ -n "$CODEMATE_QUERY" ]; then
     printf "${GREEN}Waiting for Claude to initialize...${RESET}\n"
     sleep 5
     printf "${GREEN}Sending initial query to Claude...${RESET}\n"
 
     # Send command and verify submission with retry mechanism
-    send_and_verify_command "$CLAUDE_SESSION" "$QUERY" 3
+    send_and_verify_command "$CLAUDE_SESSION" "$CODEMATE_QUERY" 3
 else
     sleep 2
 fi

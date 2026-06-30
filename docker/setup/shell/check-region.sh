@@ -150,7 +150,7 @@ match \`CODEMATE_ALLOW_IP\`. (\`CODEMATE_ALLOW_IP\` takes precedence; the
 | --- | --- |
 | Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
 | Allowed IP(s) | \`${ALLOW_IP}\` |
-| Branch | \`${BRANCH_NAME:-unknown}\` |
+| Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
 EOF
 )
 else
@@ -168,7 +168,7 @@ not match \`CODEMATE_ALLOW_COUNTRY\`. (No \`CODEMATE_ALLOW_IP\` allowlist was co
 | Detected region | \`${CURRENT_REGION}\` |
 | Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
 | Allowed country code(s) | \`${ALLOW_COUNTRY}\` |
-| Branch | \`${BRANCH_NAME:-unknown}\` |
+| Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
 
 ip-api.com response:
 
