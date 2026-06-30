@@ -17,7 +17,7 @@ CodeMate solves this by running Claude Code in an isolated Docker container wher
 - Automated repository cloning and PR management
 - Pre-installed: Go, Node.js, Python, Rust, uv
 - zsh with Oh My Zsh
-- Persistent Claude configuration
+- Persistent Claude/Codex configuration, cache, and kubeconfig through `~/.codemate`
 - Built-in Claude Code skills for PR workflow automation
 - Slack and Lark notifications when Claude stops (via `SLACK_WEBHOOK` / `LARK_WEBHOOK`)
 - tmux session management with PR comment monitoring
@@ -115,12 +115,12 @@ codemate --branch feature/xyz --docker-param "--gpus all"
 ```
 
 The setup command will:
-1. Create global configuration in `~/.codemate/` (Claude config and settings)
+1. Create global configuration in `~/.codemate/` (Claude/Codex config, cache, kubeconfig, and settings)
 2. Create project-specific `.env` file in your current directory
 3. Prompt you for Anthropic API token and other settings
 
 **Configuration Structure:**
-- **Global config**: `~/.codemate/` - Claude configuration and settings (shared across all projects)
+- **Global config**: `~/.codemate/` - shared home state mounted into the container and linked as `~/.claude`, `~/.claude.json`, `~/.codex`, `~/.cache`, and `~/.kube`
 - **Project config**: `.env` in each project directory - Project-specific secrets and settings
 
 **Repository URL Resolution**: The script determines the repository URL in this priority order:

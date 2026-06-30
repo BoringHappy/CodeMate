@@ -104,12 +104,12 @@ codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:la
 ```
 
 设置命令将：
-1. 在 `~/.codemate/` 创建全局配置（Claude 配置和设置）
+1. 在 `~/.codemate/` 创建全局配置（Claude/Codex 配置、缓存、kubeconfig 和设置）
 2. 在当前目录创建项目特定的 `.env` 文件
 3. 提示你输入 Anthropic API token 和其他设置
 
 **配置结构：**
-- **全局配置**：`~/.codemate/` - Claude 配置和设置（所有项目共享）
+- **全局配置**：`~/.codemate/` - 挂载到容器并链接为 `~/.claude`、`~/.claude.json`、`~/.codex`、`~/.cache` 和 `~/.kube` 的共享状态
 - **项目配置**：每个项目目录中的 `.env` - 项目特定的密钥和设置
 
 **仓库 URL 解析**：脚本按以下优先级确定仓库 URL：

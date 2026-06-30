@@ -188,13 +188,22 @@ setup_codemate_files() {
     print_info "Setting up CodeMate configuration..."
     echo ""
 
-    # Create global config directory
+    # Create global config directories
     if [ ! -d "$config_dir/.claude" ]; then
         mkdir -p "$config_dir/.claude"
         print_success "Created global config directory: $config_dir/.claude"
     else
         print_info "Global config directory already exists: $config_dir/.claude"
     fi
+
+    for shared_dir in .cache .codex .kube; do
+        if [ ! -d "$config_dir/$shared_dir" ]; then
+            mkdir -p "$config_dir/$shared_dir"
+            print_success "Created global config directory: $config_dir/$shared_dir"
+        else
+            print_info "Global config directory already exists: $config_dir/$shared_dir"
+        fi
+    done
 
     # Create .claude.json
     if [ ! -f "$config_dir/.claude.json" ]; then
@@ -332,6 +341,7 @@ run_codemate() {
     fi
 
     print_info "Using global configuration from: $config_dir"
+    mkdir -p "$config_dir/.cache" "$config_dir/.codex" "$config_dir/.kube"
 
     # Source .env file from current directory (project-specific)
     if [ -f "$current_dir/.env" ]; then
@@ -429,8 +439,7 @@ run_codemate() {
 
     # Build volume mounts using global config
     local volume_mounts=(
-        -v "$config_dir/.claude:/home/agent/.claude"
-        -v "$config_dir/.claude.json:/home/agent/.claude.json"
+        -v "$config_dir:/home/agent/.codemate"
     )
 
     # Mount skills directory if it exists in current directory
@@ -534,7 +543,7 @@ Environment Variables:
                        to run from (e.g. 203.0.113.7,198.51.100.0/24). The access check passes if EITHER
                        this or CODEMATE_ALLOW_COUNTRY matches. At least one of the two is required.
   DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
-  CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.kube:/home/agent/.kube $HOME/.aws:/home/agent/.aws")
+  CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.aws:/home/agent/.aws")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops
 
 Examples:
@@ -566,7 +575,7 @@ Examples:
   codemate --branch feature/xyz --mount ~/data:/data --mount ~/config:/config
 
   # Set default mounts in .env so every run picks them up
-  # echo 'CODEMATE_MOUNTS="$HOME/.kube:/home/agent/.kube $HOME/.aws:/home/agent/.aws"' >> .env
+  # echo 'CODEMATE_MOUNTS="$HOME/.aws:/home/agent/.aws"' >> .env
 
   # Run with custom image
   codemate --branch feature/xyz --image ghcr.io/boringhappy/codemate:v1.0.0
@@ -734,7 +743,8 @@ main() {
             echo "  1. Global config directory: $config_dir/.claude"
             echo "  2. Claude config file: $config_dir/.claude.json"
             echo "  3. Settings file: $config_dir/.claude/settings.json"
-            echo "  4. Project .env file: $current_dir/.env"
+            echo "  4. Shared Codex/.cache/kube directories under: $config_dir"
+            echo "  5. Project .env file: $current_dir/.env"
             echo ""
         fi
 

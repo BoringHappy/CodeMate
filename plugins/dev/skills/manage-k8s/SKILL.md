@@ -10,19 +10,21 @@ Inspect, deploy, and manage Kubernetes resources with `kubectl` and `helm`. Both
 
 ## Prepare
 
-CodeMate does **not** mount a kubeconfig by default. Before this skill can talk to any cluster, the user must launch the container with their kubeconfig mounted in.
+CodeMate mounts `~/.codemate` by default and links `~/.codemate/.kube` to `~/.kube` inside the container. Put kubeconfig files under `~/.codemate/.kube` on the host before launching CodeMate.
 
-**Launch CodeMate with the kubeconfig mounted:**
+**Default kubeconfig setup:**
+
+```bash
+mkdir -p ~/.codemate/.kube
+cp ~/.kube/config ~/.codemate/.kube/config
+codemate --branch YOUR_BRANCH
+```
+
+You can still override the default with an explicit mount when needed:
 
 ```bash
 codemate --branch YOUR_BRANCH \
   --mount ~/.kube:/home/agent/.kube
-```
-
-Or set it once in `.env` so every run picks it up:
-
-```bash
-CODEMATE_MOUNTS="$HOME/.kube:/home/agent/.kube"
 ```
 
 If the kubeconfig references TLS client certs or token files outside `~/.kube`, mount those paths too (or use `--mount` per file).
