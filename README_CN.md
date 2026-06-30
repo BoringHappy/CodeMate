@@ -47,7 +47,7 @@ CodeMate 通过在隔离的 Docker 容器中运行 Claude Code 来解决这个�
 
 ```bash
 # 推荐方式
-uv tool install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
+uv tool install git+https://github.com/BoringHappy/CodeMate.git
 ```
 
 使用 `uv` 安装后，可通过以下命令升级：
@@ -59,7 +59,7 @@ uv tool upgrade codemate-cli
 如果你使用 `pipx`：
 
 ```bash
-pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
+pipx install git+https://github.com/BoringHappy/CodeMate.git
 ```
 
 然后执行一次全局设置：
@@ -69,7 +69,7 @@ pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 codemate --setup
 ```
 
-仓库根目录下的旧 shell launcher 仍保留用于兼容；新的 CLI 实现在 `cli/` 中。
+仓库根目录下的旧 shell launcher 仍保留用于兼容；Python CLI 包位于 `src/` 中。
 
 ### 使用方法
 
