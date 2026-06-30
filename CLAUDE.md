@@ -47,7 +47,7 @@ Note: All setup scripts live under `docker/setup/` in the repository, but are co
 - `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`).
 - `CODEMATE_ALLOW_IP` — comma-separated exact IPs or IPv4 CIDR ranges (e.g. `203.0.113.7,198.51.100.0/24`).
 
-At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set — the launcher refuses to start the container otherwise. The container enforces the check at startup. `CODEMATE_ALLOW_IP` takes precedence: if it is set, only the IP allowlist is checked (and only `ifconfig.me` is called); `CODEMATE_ALLOW_COUNTRY` is consulted solely as a fallback when `CODEMATE_ALLOW_IP` is unset. This keeps the check to a single external API call.
+At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set; the CLI refuses to start the container otherwise. The container enforces the check at startup. `CODEMATE_ALLOW_IP` takes precedence: if it is set, only the IP allowlist is checked (and only `ifconfig.me` is called); `CODEMATE_ALLOW_COUNTRY` is consulted solely as a fallback when `CODEMATE_ALLOW_IP` is unset. This keeps the check to a single external API call.
 
 ### Plugin Marketplace
 
@@ -122,7 +122,7 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 - `docker/Dockerfile` - Combined Claude Code and Codex container definition, using the `codemate-base` image
 - `docker/Dockerfile.base` - Base image with system packages and development tools
 - `docker/setup/` - Container setup scripts (copied into container at build time)
-- `codemate` - Main script to run CodeMate with configuration management (installed globally or run locally)
+- `src/cli/main.py` - Python CLI entry point for running CodeMate with configuration management
 - `docker/setup/python/setup-repo.py` - Main repo/PR setup logic, reads PR template from `.github/PULL_REQUEST_TEMPLATE.md`
 
 ## Development Notes

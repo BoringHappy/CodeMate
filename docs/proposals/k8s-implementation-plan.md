@@ -38,7 +38,7 @@ effort → decisions.
 | Tmux launch + injection | **Reuse** | `docker/setup/run-claude.sh`, `common.sh::send_and_verify_command` |
 | Idle/commit hooks | **Reuse** | `plugins/workspace/hooks/*` |
 | Repo/branch/PR bootstrap | **Reuse/extend** | `docker/setup/python/setup-repo.py` |
-| `codemate` launcher (cluster mode → create `PRSession`) | **Modify** | `codemate` (keeps local `docker run` as back-compat) |
+| `codemate` CLI (cluster mode → create `PRSession`) | **Modify** | `src/cli/main.py` (keeps local `docker run` as back-compat) |
 | Helm chart | **New** | — |
 | Tunnels (cloudflared / frpc) | **New** (chart templates) | — |
 
@@ -317,7 +317,7 @@ other half of the backstop (catches missed `pull_request.opened`).
 - [ ] On PR close/merge, delete the PR's session blob alongside the pod.
 
 ### 2.5 `codemate` CLI cluster mode (proposal §5.2)
-- [ ] Add a cluster-backed mode to the `codemate` launcher: instead of `docker run` locally, create a
+- [ ] Add a cluster-backed mode to the `codemate` CLI: instead of `docker run` locally, create a
       `PRSession` CR (via `kubectl`/operator API) from `--branch`/`--pr`/`--repo`/`--query`.
 - [ ] The pod creates the PR itself by **reusing `setup-repo.py`** (already clones + checks out
       branch/PR + opens a PR from the template) — no empty-commit trick needed; no issue required.

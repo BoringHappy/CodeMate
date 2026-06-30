@@ -32,7 +32,7 @@ CodeMate solves this by running Claude Code in an isolated Docker container wher
 
 Run `codemate --setup` to create the required configuration files (global config in `~/.codemate/` and project `.env`).
 
-> **Note:** `git` is also required as a prerequisite — the script checks for it at startup.
+> **Note:** `git` is also required as a prerequisite; the CLI checks for it at startup.
 
 #### Mac Users
 
@@ -77,7 +77,7 @@ Then run the one-time global setup:
 codemate --setup
 ```
 
-The legacy shell launcher remains at the repository root for compatibility; the Python CLI package lives in `src/`.
+The `codemate` command is provided by the Python CLI package in `src/`.
 
 ### Usage
 
@@ -140,7 +140,7 @@ The setup command will:
 - **Global config**: `~/.codemate/` - shared home state; each top-level file or directory is mounted into `$HOME` with the same basename
 - **Project config**: `.env` in each project directory - Project-specific secrets and settings
 
-**Repository URL Resolution**: The script determines the repository URL in this priority order:
+**Repository URL Resolution**: The CLI determines the repository URL in this priority order:
 1. `--repo` command-line argument (highest priority)
 2. `CODEMATE_GIT_REPO_URL` environment variable or `.env` file
 3. Current directory's git remote origin URL (auto-detected)
@@ -175,7 +175,7 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
   - **Note:** Only works with `--build`. To use a pre-built image, use `--image` instead
 
 When `--build` is used:
-1. The script builds the Docker image from the specified Dockerfile
+1. The CLI builds the Docker image from the specified Dockerfile
 2. The default image tag is `codemate:local` (unless `--tag` is specified)
 3. The locally built image is used instead of pulling from the registry
 4. The `--image` option is ignored when `--build` is used
@@ -215,7 +215,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 > **Note:** When using `codemate`, these variables are handled automatically through the setup process. This reference is primarily for advanced Docker usage or troubleshooting.
 
-The `codemate` launcher resolves configuration in this order:
+The `codemate` CLI resolves configuration in this order:
 
 1. Command-line options, such as `--repo`, `--branch`, `--agent`, `--mount`, and `--docker-param`
 2. Project `.env`
