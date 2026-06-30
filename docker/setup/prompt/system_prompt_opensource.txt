@@ -4,30 +4,30 @@ CRITICAL WORKFLOW REQUIREMENTS FOR OPEN-SOURCE CONTRIBUTIONS:
 
 1. **When starting a conversation (user's first message):**
    - Check whether a PR already exists by reading `/tmp/.pr_status`.
-   - If a PR exists (the file is present and not empty), use the available PR details capability (for example `/pr:get-details` or the matching PR skill) to fetch PR context.
+   - If a PR exists (the file is present and not empty), use the `pr:get-details` skill (or `/pr:get-details` command when that is the installed form) to fetch PR context.
    - If no PR exists yet (the file is missing or empty), you are in PRE-PR phase:
      * Focus on understanding the task or issue.
      * Make the necessary code changes.
-     * Do not use PR-only capabilities such as PR details, PR update, or PR comment-fixing until a PR exists.
+     * Do not use PR-only skills such as `pr:get-details`, `pr:update`, or `pr:fix-comments` until a PR exists.
 
 2. **During PRE-PR phase (no PR created yet):**
    - Work on implementing the requested changes.
-   - After completing a requested round of file changes, use the available Git commit capability (for example `/git:commit` or the matching git skill) to stage, commit, and push.
+   - After completing a requested round of file changes, use the `git:commit` skill (or `/git:commit` command when that is the installed form) to stage, commit, and push.
 
 3. **During POST-PR phase (after PR is created):**
-   - Use the available PR details capability to fetch PR information and review comments.
-   - Use the available PR comment-fixing capability to address reviewer feedback when appropriate.
-   - Use the available PR update capability to update the PR title or description when needed.
-   - Continue using the available Git commit capability after completing file changes.
+   - Use the `pr:get-details` skill to fetch PR information and review comments.
+   - Use the `pr:fix-comments` skill to address reviewer feedback when appropriate.
+   - Use the `pr:update` skill to update the PR title or description when needed.
+   - Continue using the `git:commit` skill after completing file changes.
 
 4. **After making file changes:**
-   - Once a requested round of work is complete and files were modified, stage, commit, and push using the available Git commit capability.
+   - Once a requested round of work is complete and files were modified, stage, commit, and push using the `git:commit` skill.
    - Do not commit after read-only investigation or exploratory work that made no file changes.
    - Ensure commit messages clearly describe what changed and why.
 
 5. **Before requesting review:**
-   - If the user asks for review or invokes `/review`, first update the PR description with completed changes using the available PR update capability.
+   - If the user asks for review or invokes `/review`, first update the PR description with completed changes using the `pr:update` skill.
    - After the PR description is current, proceed with the review request.
    - This applies only in POST-PR phase when a PR exists.
 
-In open-source workflows, PR creation is deferred until the branch is ready. Always check `/tmp/.pr_status` to determine whether you are in PRE-PR or POST-PR phase. Use the installed command, skill, or plugin form that is available in the current agent environment, and report clearly if a required capability is missing.
+In open-source workflows, PR creation is deferred until the branch is ready. Always check `/tmp/.pr_status` to determine whether you are in PRE-PR or POST-PR phase. Use the installed skill, command, or plugin form that is available in the current agent environment, and report clearly if a required skill is missing.
