@@ -15,12 +15,12 @@ NC='\033[0m' # No Color
 # Default values
 CODEMATE_GIT_REPO_URL="${CODEMATE_GIT_REPO_URL:-$(git config --get remote.origin.url 2>/dev/null || echo '')}"
 CODEMATE_UPSTREAM_REPO_URL="${CODEMATE_UPSTREAM_REPO_URL:-}"
-CODEMATE_BRANCH_NAME="${CODEMATE_BRANCH_NAME:-}"
-CODEMATE_PR_NUMBER="${CODEMATE_PR_NUMBER:-}"
-CODEMATE_PR_TITLE="${CODEMATE_PR_TITLE:-}"
-CODEMATE_ISSUE_NUMBER="${CODEMATE_ISSUE_NUMBER:-}"
-CODEMATE_QUERY="${CODEMATE_QUERY:-}"
-CODEMATE_NO_PR="${CODEMATE_NO_PR:-}"
+CODEMATE_BRANCH_NAME=""
+CODEMATE_PR_NUMBER=""
+CODEMATE_PR_TITLE=""
+CODEMATE_ISSUE_NUMBER=""
+CODEMATE_QUERY=""
+CODEMATE_NO_PR=""
 DOCKER_EXTRA_PARAMS=()
 CODEMATE_IMAGE="${CODEMATE_IMAGE:-ghcr.io/boringhappy/codemate:latest}"
 BUILD_LOCAL=false
@@ -333,6 +333,13 @@ run_codemate() {
 
     print_info "Using global configuration from: $config_dir"
 
+    local launcher_branch_name="$CODEMATE_BRANCH_NAME"
+    local launcher_pr_number="$CODEMATE_PR_NUMBER"
+    local launcher_pr_title="$CODEMATE_PR_TITLE"
+    local launcher_issue_number="$CODEMATE_ISSUE_NUMBER"
+    local launcher_query="$CODEMATE_QUERY"
+    local launcher_no_pr="$CODEMATE_NO_PR"
+
     # Source .env file from current directory (project-specific)
     if [ -f "$current_dir/.env" ]; then
         set -a
@@ -342,6 +349,13 @@ run_codemate() {
         print_warning "No .env file found in current directory"
         echo "Create one with: codemate --setup"
     fi
+
+    CODEMATE_BRANCH_NAME="$launcher_branch_name"
+    CODEMATE_PR_NUMBER="$launcher_pr_number"
+    CODEMATE_PR_TITLE="$launcher_pr_title"
+    CODEMATE_ISSUE_NUMBER="$launcher_issue_number"
+    CODEMATE_QUERY="$launcher_query"
+    CODEMATE_NO_PR="$launcher_no_pr"
 
     # Require at least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP so the
     # container can enforce its access check (it passes if either one matches).
@@ -525,11 +539,6 @@ Options:
 Environment Variables:
   CODEMATE_GIT_REPO_URL         Repository URL (defaults to current repo's remote)
   CODEMATE_UPSTREAM_REPO_URL    Upstream repository URL (for fork workflows)
-  CODEMATE_BRANCH_NAME          Branch to work on
-  CODEMATE_PR_NUMBER            Existing PR number
-  CODEMATE_PR_TITLE             PR title
-  CODEMATE_ISSUE_NUMBER         GitHub issue number
-  CODEMATE_QUERY                Initial query to send to Claude after startup
   CODEMATE_GITHUB_TOKEN         GitHub personal access token
   CODEMATE_GIT_USER_NAME        Git commit author name
   CODEMATE_GIT_USER_EMAIL       Git commit author email

@@ -202,11 +202,6 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 |----------|----------|-------------|
 | `CODEMATE_GIT_REPO_URL` | No | Repository URL (defaults to current repo's remote) |
 | `CODEMATE_UPSTREAM_REPO_URL` | No | Upstream repository URL (for fork-based workflows) |
-| `CODEMATE_BRANCH_NAME` | No | Branch to work on |
-| `CODEMATE_PR_NUMBER` | No | Existing PR number to work on |
-| `CODEMATE_PR_TITLE` | No | PR title for newly created PRs |
-| `CODEMATE_ISSUE_NUMBER` | No | GitHub issue number (creates branch `issue-NUMBER` and uses `/issue:read-issue` skill) |
-| `CODEMATE_NO_PR` | No | Set to `true` to skip PR creation and branch push for new branches |
 | `CODEMATE_GITHUB_TOKEN` | Auto | GitHub personal access token (defaults to `gh auth token` if not provided) |
 | `CODEMATE_GIT_USER_NAME` | Auto | Git commit author name (defaults to `git config user.name` if not provided) |
 | `CODEMATE_GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
@@ -216,12 +211,13 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `LARK_WEBHOOK` | No | Lark Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
 | `ANTHROPIC_AUTH_TOKEN` | No | Anthropic API token (for custom API endpoints) |
 | `ANTHROPIC_BASE_URL` | No | Anthropic API base URL (for custom API endpoints) |
-| `CODEMATE_QUERY` | No | Initial query to send to the selected agent after startup |
 | `CODEMATE_DEFAULT_MARKETPLACES` | No | Comma-separated default plugin marketplaces (default: `BoringHappy/CodeMate`) |
 | `CODEMATE_DEFAULT_PLUGINS` | No | Comma-separated default plugins (default: `git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`) |
 | `CODEMATE_CUSTOM_MARKETPLACES` | No | Comma-separated list of custom plugin marketplace repositories (e.g., `username/repo1,org/repo2`) |
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
+
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` are created by the `codemate` launcher from CLI options and passed into the container; do not set them directly in `.env`.
 
 
 ## How It Works

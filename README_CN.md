@@ -227,11 +227,6 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 |----------|----------|-------------|
 | `CODEMATE_GIT_REPO_URL` | 否 | 仓库 URL（默认为当前仓库的 remote） |
 | `CODEMATE_UPSTREAM_REPO_URL` | 否 | 上游仓库 URL（用于 fork 工作流） |
-| `CODEMATE_BRANCH_NAME` | 否 | 要工作的分支 |
-| `CODEMATE_PR_NUMBER` | 否 | 要工作的现有 PR 编号 |
-| `CODEMATE_PR_TITLE` | 否 | 新建 PR 的标题 |
-| `CODEMATE_ISSUE_NUMBER` | 否 | GitHub issue 编号（创建分支 `issue-NUMBER` 并使用 `/issue:read-issue` skill） |
-| `CODEMATE_NO_PR` | 否 | 设置为 `true` 时，创建新分支后跳过创建 PR 和推送分支 |
 | `CODEMATE_GITHUB_TOKEN` | 自动 | GitHub 个人访问令牌（如果未提供，默认为 `gh auth token`） |
 | `CODEMATE_GIT_USER_NAME` | 自动 | Git commit author 名称（如果未提供，默认为 `git config user.name`） |
 | `CODEMATE_GIT_USER_EMAIL` | 自动 | Git commit author 邮箱（如果未提供，默认为 `git config user.email`） |
@@ -240,11 +235,12 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 | `SLACK_WEBHOOK` | 否 | Slack Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `ANTHROPIC_AUTH_TOKEN` | 否 | Anthropic API token（用于自定义 API 端点） |
 | `ANTHROPIC_BASE_URL` | 否 | Anthropic API 基础 URL（用于自定义 API 端点） |
-| `CODEMATE_QUERY` | 否 | 启动后发送给所选 agent 的初始 query |
 | `CODEMATE_DEFAULT_MARKETPLACES` | 否 | 逗号分隔的默认插件市场（默认：`BoringHappy/CodeMate`） |
 | `CODEMATE_DEFAULT_PLUGINS` | 否 | 逗号分隔的默认插件（默认：`git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`） |
 | `CODEMATE_CUSTOM_MARKETPLACES` | 否 | 逗号分隔的自定义插件市场仓库列表（例如：`username/repo1,org/repo2`） |
 | `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
+
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY` 和 `CODEMATE_NO_PR` 由 `codemate` 启动脚本根据 CLI 参数创建并传入容器，不应直接在 `.env` 中设置。
 
 
 ## 工作原理
