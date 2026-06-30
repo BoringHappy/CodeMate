@@ -111,6 +111,7 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_GITHUB_TOKEN", derived=gh_token, secret=True),
     Field("CODEMATE_GIT_USER_NAME", derived=git_user_name),
     Field("CODEMATE_GIT_USER_EMAIL", derived=git_user_email),
+    Field("CODEMATE_CO_AUTHOR_BY", "co_author_by"),
     Field("CODEMATE_ALLOW_COUNTRY"),
     Field("CODEMATE_ALLOW_IP"),
     Field("CODEMATE_DOCKER_PARAMS", "docker_params", docker_export=False),
@@ -415,6 +416,8 @@ def create_setup_files(cwd: Path) -> None:
             "# CODEMATE_GIT_REPO_URL=\n\n"
             "# Runtime agent: claude (default) or codex\n"
             "# CODEMATE_AGENT=claude\n\n"
+            "# Optional commit co-author used by the git commit skill\n"
+            "# CODEMATE_CO_AUTHOR_BY=Name <email@example.com>\n\n"
             "# Access control. Set at least one allowlist.\n"
             "CODEMATE_ALLOW_COUNTRY=\n"
             "CODEMATE_ALLOW_IP=\n"
@@ -547,6 +550,7 @@ def cli(
     issue: Optional[str] = typer.Option(None, "--issue", help="GitHub issue number to work on."),
     query: Optional[str] = typer.Option(None, "--query", help="Initial query to send to the selected agent."),
     agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent."),
+    co_author_by: Optional[str] = typer.Option(None, "--co-author-by", help="Commit co-author, e.g. 'Name <email@example.com>'."),
     no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push."),
     docker_param: List[str] = typer.Option([], "--docker-param", help="Extra Docker run parameter."),
     repo: Optional[str] = typer.Option(None, "--repo", help="Git repository URL."),
@@ -570,6 +574,7 @@ def cli(
         issue=issue,
         query=query,
         agent=agent.value if agent else None,
+        co_author_by=co_author_by,
         no_pr=no_pr,
         docker_param=docker_param,
         repo=repo,

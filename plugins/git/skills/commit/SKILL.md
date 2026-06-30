@@ -22,6 +22,9 @@ Current branch:
 Diff of changes:
 !`git diff --stat`
 
+Commit co-author trailer:
+!`if [ -n "${CODEMATE_CO_AUTHOR_BY:-}" ]; then case "$CODEMATE_CO_AUTHOR_BY" in Co-authored-by:*) printf '%s\n' "$CODEMATE_CO_AUTHOR_BY";; *) printf 'Co-authored-by: %s\n' "$CODEMATE_CO_AUTHOR_BY";; esac; fi`
+
 ## Instructions
 
 1. Review the changes shown above
@@ -30,7 +33,10 @@ Diff of changes:
    - Uses imperative mood (e.g., "Add feature" not "Added feature")
    - Is concise but descriptive
    - Follows the style of recent commits if a pattern exists
-4. Push to the remote using `git push`
+4. If the commit co-author trailer shown above is not empty, append it to the commit message body after a blank line
+   - Example: `git commit -m "Add feature" -m "Co-authored-by: Name <email@example.com>"`
+   - If `CODEMATE_CO_AUTHOR_BY` does not start with `Co-authored-by:`, prepend `Co-authored-by: ` before committing
+5. Push to the remote using `git push`
 
 If the branch has no upstream, use:
 ```bash
