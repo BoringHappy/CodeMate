@@ -1,6 +1,6 @@
 {
   "name": "issue",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "GitHub Issue workflow management with skills for reading, refining, triaging, and classifying issues",
   "author": {
     "name": "CodeMate"
