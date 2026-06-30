@@ -332,7 +332,11 @@ def target_label(config: Mapping[str, ResolvedValue]) -> str:
     return "none"
 
 
-def print_launch_summary(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
+def detail_list(items: Sequence[str], empty: str = "none") -> str:
+    return "\n".join(items) if items else empty
+
+
+def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
     default_marketplaces = split_csv(value(config, "CODEMATE_DEFAULT_MARKETPLACES"))
     custom_marketplaces = split_csv(value(config, "CODEMATE_CUSTOM_MARKETPLACES"))
     default_plugins = split_csv(value(config, "CODEMATE_DEFAULT_PLUGINS"))
@@ -344,20 +348,23 @@ def print_launch_summary(config: Mapping[str, ResolvedValue], args: SimpleNamesp
         for label, key in (("country", "CODEMATE_ALLOW_COUNTRY"), ("IP", "CODEMATE_ALLOW_IP"))
         if value(config, key)
     ]
-    extra_env_count = sum(1 for item in config.values() if item.field is None)
+    extra_env_keys = sorted(key for key, item in config.items() if item.field is None)
 
-    table = Table(title="CodeMate Launch", show_header=False, box=None, padding=(0, 1))
+    table = Table(title="CodeMate Launch Details", show_header=False, box=None, padding=(0, 1))
     table.add_column("Setting", style="cyan", no_wrap=True)
     table.add_column("Value")
     table.add_row("Target", target_label(config))
     table.add_row("Agent", value(config, "CODEMATE_AGENT"))
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
-    table.add_row("Plugins", f"{len(default_plugins)} default, {len(custom_plugins)} custom")
-    table.add_row("Marketplaces", f"{len(default_marketplaces)} default, {len(custom_marketplaces)} custom")
-    table.add_row("Runtime extras", f"{len(mounts)} custom mount(s), {len(docker_params)} docker param(s)")
-    table.add_row("Extra env", f"{extra_env_count} var(s)")
-    table.add_row("Allowlist", ", ".join(allow_sources))
+    table.add_row("Default plugins", detail_list(default_plugins))
+    table.add_row("Custom plugins", detail_list(custom_plugins))
+    table.add_row("Default marketplaces", detail_list(default_marketplaces))
+    table.add_row("Custom marketplaces", detail_list(custom_marketplaces))
+    table.add_row("Custom mounts", detail_list(mounts))
+    table.add_row("Docker params", detail_list(docker_params))
+    table.add_row("Extra env", detail_list(extra_env_keys))
+    table.add_row("Allowlist", detail_list(allow_sources))
     console.print(table)
 
 
@@ -518,7 +525,7 @@ def run_codemate(args: SimpleNamespace) -> None:
     env_file.close()
     try:
         cmd = docker_command(config, args, env_file.name)
-        print_launch_summary(config, args)
+        print_launch_details(config, args)
         if args.dry_run:
             print(" ".join(shlex.quote(part) for part in cmd).replace(env_file.name, "<generated-env-file>"))
             return
