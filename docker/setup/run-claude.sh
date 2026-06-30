@@ -30,7 +30,7 @@ fi
 printf "${GREEN}Starting Claude Code in tmux session: $CLAUDE_SESSION${RESET}\n"
 
 # Choose system prompt based on workflow type
-if [ -n "$UPSTREAM_REPO_URL" ]; then
+if [ -n "$CODEMATE_UPSTREAM_REPO_URL" ]; then
     # Open-source workflow: use opensource system prompt
     SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt_opensource.txt"
     printf "${CYAN}Using open-source workflow system prompt${RESET}\n"
@@ -43,13 +43,13 @@ fi
 tmux new-session -d -s "$CLAUDE_SESSION" "claude --dangerously-skip-permissions --append-system-prompt \"\$(cat $SYSTEM_PROMPT_FILE)\""
 
 # Send initial query if provided
-if [ -n "$QUERY" ]; then
+if [ -n "$CODEMATE_QUERY" ]; then
     printf "${GREEN}Waiting for Claude to initialize...${RESET}\n"
     sleep 5
     printf "${GREEN}Sending initial query to Claude...${RESET}\n"
 
     # Send command and verify submission with retry mechanism
-    send_and_verify_command "$CLAUDE_SESSION" "$QUERY" 3
+    send_and_verify_command "$CLAUDE_SESSION" "$CODEMATE_QUERY" 3
 else
     sleep 2
 fi

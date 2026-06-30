@@ -5,13 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Determine workspace path the same way setup-repo.py does:
-# /home/agent/<repo_name>, where <repo_name> is derived from GIT_REPO_URL.
-if [ -z "$GIT_REPO_URL" ]; then
-    printf "${BLUE}GIT_REPO_URL not set, skipping pre-commit setup${RESET}\n"
+# /home/agent/<repo_name>, where <repo_name> is derived from CODEMATE_GIT_REPO_URL.
+if [ -z "$CODEMATE_GIT_REPO_URL" ]; then
+    printf "${BLUE}CODEMATE_GIT_REPO_URL not set, skipping pre-commit setup${RESET}\n"
     exit 0
 fi
 
-repo_url="${GIT_REPO_URL%.git}"
+repo_url="${CODEMATE_GIT_REPO_URL%.git}"
 repo_url="${repo_url%/}"
 repo_name="${repo_url##*/}"
 workspace="/home/agent/${repo_name}"

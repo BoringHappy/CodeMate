@@ -13,12 +13,12 @@ mkdir -p /home/agent/.claude/tmp
 export TMPDIR=/home/agent/.claude/tmp
 
 # Combine default and custom marketplaces
-ALL_MARKETPLACES="${DEFAULT_MARKETPLACES}"
-if [ -n "$CUSTOM_MARKETPLACES" ]; then
+ALL_MARKETPLACES="${CODEMATE_DEFAULT_MARKETPLACES}"
+if [ -n "$CODEMATE_CUSTOM_MARKETPLACES" ]; then
     if [ -n "$ALL_MARKETPLACES" ]; then
-        ALL_MARKETPLACES="${ALL_MARKETPLACES},${CUSTOM_MARKETPLACES}"
+        ALL_MARKETPLACES="${ALL_MARKETPLACES},${CODEMATE_CUSTOM_MARKETPLACES}"
     else
-        ALL_MARKETPLACES="${CUSTOM_MARKETPLACES}"
+        ALL_MARKETPLACES="${CODEMATE_CUSTOM_MARKETPLACES}"
     fi
 fi
 
@@ -50,12 +50,12 @@ printf "\n${CYAN}Updating marketplaces:${RESET}\n"
 update_marketplaces
 
 # Combine default and custom plugins
-ALL_PLUGINS="${DEFAULT_PLUGINS}"
-if [ -n "$CUSTOM_PLUGINS" ]; then
+ALL_PLUGINS="${CODEMATE_DEFAULT_PLUGINS}"
+if [ -n "$CODEMATE_CUSTOM_PLUGINS" ]; then
     if [ -n "$ALL_PLUGINS" ]; then
-        ALL_PLUGINS="${ALL_PLUGINS},${CUSTOM_PLUGINS}"
+        ALL_PLUGINS="${ALL_PLUGINS},${CODEMATE_CUSTOM_PLUGINS}"
     else
-        ALL_PLUGINS="${CUSTOM_PLUGINS}"
+        ALL_PLUGINS="${CODEMATE_CUSTOM_PLUGINS}"
     fi
 fi
 

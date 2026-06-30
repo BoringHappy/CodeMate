@@ -27,14 +27,14 @@ printf "${GREEN}Starting Codex in tmux session: $CODEX_SESSION${RESET}\n"
 # CodeMate already isolates Codex inside a disposable container, so Codex can
 # operate without a second sandbox or interactive approval prompts.
 CODEX_COMMAND="codex --dangerously-bypass-approvals-and-sandbox"
-if [ -n "$QUERY" ]; then
-    printf -v QUOTED_QUERY '%q' "$QUERY"
+if [ -n "$CODEMATE_QUERY" ]; then
+    printf -v QUOTED_QUERY '%q' "$CODEMATE_QUERY"
     CODEX_COMMAND="$CODEX_COMMAND $QUOTED_QUERY"
 fi
 
 tmux new-session -d -s "$CODEX_SESSION" "$CODEX_COMMAND"
 
-if [ -n "$QUERY" ]; then
+if [ -n "$CODEMATE_QUERY" ]; then
     printf "${GREEN}Starting Codex with the initial query...${RESET}\n"
     sleep 2
 fi

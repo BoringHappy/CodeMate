@@ -114,7 +114,7 @@ codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:la
 
 **仓库 URL 解析**：脚本按以下优先级确定仓库 URL：
 1. `--repo` 命令行参数（最高优先级）
-2. `GIT_REPO_URL` 环境变量或 `.env` 文件
+2. `CODEMATE_GIT_REPO_URL` 环境变量或 `.env` 文件
 3. 当前目录的 git remote origin URL（自动检测）
 4. 如果都不可用，则报错
 
@@ -225,24 +225,22 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 
 | 变量 | 必需 | 描述 |
 |----------|----------|-------------|
-| `GIT_REPO_URL` | 否 | 仓库 URL（默认为当前仓库的 remote） |
-| `UPSTREAM_REPO_URL` | 否 | 上游仓库 URL（用于 fork 工作流） |
-| `BRANCH_NAME` | 否 | 要工作的分支 |
-| `PR_NUMBER` | 否 | 要工作的现有 PR 编号 |
-| `ISSUE_NUMBER` | 否 | GitHub issue 编号（创建分支 `issue-NUMBER` 并使用 `/issue:read-issue` skill） |
+| `CODEMATE_GIT_REPO_URL` | 否 | 仓库 URL（默认为当前仓库的 remote） |
+| `CODEMATE_UPSTREAM_REPO_URL` | 否 | 上游仓库 URL（用于 fork 工作流） |
 | `CODEMATE_GITHUB_TOKEN` | 自动 | GitHub 个人访问令牌（如果未提供，默认为 `gh auth token`） |
-| `GIT_USER_NAME` | 自动 | Git commit author 名称（如果未提供，默认为 `git config user.name`） |
-| `GIT_USER_EMAIL` | 自动 | Git commit author 邮箱（如果未提供，默认为 `git config user.email`） |
+| `CODEMATE_GIT_USER_NAME` | 自动 | Git commit author 名称（如果未提供，默认为 `git config user.name`） |
+| `CODEMATE_GIT_USER_EMAIL` | 自动 | Git commit author 邮箱（如果未提供，默认为 `git config user.email`） |
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
 | `SLACK_WEBHOOK` | 否 | Slack Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `ANTHROPIC_AUTH_TOKEN` | 否 | Anthropic API token（用于自定义 API 端点） |
 | `ANTHROPIC_BASE_URL` | 否 | Anthropic API 基础 URL（用于自定义 API 端点） |
-| `QUERY` | 否 | 启动后发送给所选 agent 的初始 query |
-| `DEFAULT_MARKETPLACES` | 否 | 逗号分隔的默认插件市场（默认：`BoringHappy/CodeMate`） |
-| `DEFAULT_PLUGINS` | 否 | 逗号分隔的默认插件（默认：`git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`） |
-| `CUSTOM_MARKETPLACES` | 否 | 逗号分隔的自定义插件市场仓库列表（例如：`username/repo1,org/repo2`） |
-| `CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
+| `CODEMATE_DEFAULT_MARKETPLACES` | 否 | 逗号分隔的默认插件市场（默认：`BoringHappy/CodeMate`） |
+| `CODEMATE_DEFAULT_PLUGINS` | 否 | 逗号分隔的默认插件（默认：`git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`） |
+| `CODEMATE_CUSTOM_MARKETPLACES` | 否 | 逗号分隔的自定义插件市场仓库列表（例如：`username/repo1,org/repo2`） |
+| `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
+
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY` 和 `CODEMATE_NO_PR` 由 `codemate` 启动脚本根据 CLI 参数创建并传入容器，不应直接在 `.env` 中设置。
 
 
 ## 工作原理
@@ -291,24 +289,24 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 
 ```bash
 # 覆盖默认市场（可选）
-DEFAULT_MARKETPLACES=BoringHappy/CodeMate
+CODEMATE_DEFAULT_MARKETPLACES=BoringHappy/CodeMate
 
 # 覆盖默认插件（可选）
-DEFAULT_PLUGINS=git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate
+CODEMATE_DEFAULT_PLUGINS=git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate
 
 # 设置为空以禁用所有默认值（可选）
-DEFAULT_MARKETPLACES=
-DEFAULT_PLUGINS=
+CODEMATE_DEFAULT_MARKETPLACES=
+CODEMATE_DEFAULT_PLUGINS=
 
 # 添加自定义插件市场（逗号分隔的 GitHub 仓库路径）
-CUSTOM_MARKETPLACES=username/my-marketplace,org/another-marketplace
+CODEMATE_CUSTOM_MARKETPLACES=username/my-marketplace,org/another-marketplace
 
 # 添加要安装的自定义插件（逗号分隔的插件名称）
-CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
+CODEMATE_CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
 ```
 
 **工作原理：**
-1. 默认情况下，CodeMate 会从 `DEFAULT_MARKETPLACES` 安装市场，从 `DEFAULT_PLUGINS` 安装插件
+1. 默认情况下，CodeMate 会从 `CODEMATE_DEFAULT_MARKETPLACES` 安装市场，从 `CODEMATE_DEFAULT_PLUGINS` 安装插件
 2. 你可以通过设置环境变量为不同的值来覆盖这些默认值
 3. 你可以通过将它们设置为空字符串来禁用所有默认值
 4. 在容器启动期间，自定义市场和插件会在默认值之后添加
@@ -320,8 +318,8 @@ CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
 如果你在 `github.com/myorg/my-plugins` 有一个自定义插件市场，其中有一个名为 `example-skill` 的插件，你可以这样配置：
 
 ```bash
-CUSTOM_MARKETPLACES=myorg/my-plugins
-CUSTOM_PLUGINS=example-skill@my-plugins
+CODEMATE_CUSTOM_MARKETPLACES=myorg/my-plugins
+CODEMATE_CUSTOM_PLUGINS=example-skill@my-plugins
 ```
 
 然后在 Claude Code 中使用：

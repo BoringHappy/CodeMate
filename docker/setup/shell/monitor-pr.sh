@@ -39,15 +39,15 @@ case "$CODEMATE_AGENT" in
         exit 1
         ;;
 esac
-AGENT_SESSION="${AGENT_SESSION:-${CLAUDE_SESSION:-$DEFAULT_AGENT_SESSION}}"
-STATE_FILE="${STATE_FILE:-/tmp/pr-monitor-state}"
+CODEMATE_AGENT_SESSION="${CODEMATE_AGENT_SESSION:-${CLAUDE_SESSION:-$DEFAULT_AGENT_SESSION}}"
+CODEMATE_PR_MONITOR_STATE_FILE="${CODEMATE_PR_MONITOR_STATE_FILE:-/tmp/pr-monitor-state}"
 
-# Derive repo directory from GIT_REPO_URL (e.g., https://github.com/org/repo.git -> /home/agent/repo)
-if [ -z "$REPO_DIR" ] && [ -n "$GIT_REPO_URL" ]; then
-    REPO_NAME=$(basename "$GIT_REPO_URL" .git)
-    REPO_DIR="/home/agent/$REPO_NAME"
+# Derive repo directory from CODEMATE_GIT_REPO_URL (e.g., https://github.com/org/repo.git -> /home/agent/repo)
+if [ -z "$CODEMATE_REPO_DIR" ] && [ -n "$CODEMATE_GIT_REPO_URL" ]; then
+    REPO_NAME=$(basename "$CODEMATE_GIT_REPO_URL" .git)
+    CODEMATE_REPO_DIR="/home/agent/$REPO_NAME"
 fi
-cd "${REPO_DIR:-/home/agent/repo}" || { echo "$(date): Failed to cd to repo directory"; exit 1; }
+cd "${CODEMATE_REPO_DIR:-/home/agent/repo}" || { echo "$(date): Failed to cd to repo directory"; exit 1; }
 
 # Function to check if a tmux session exists
 session_exists() {
@@ -58,7 +58,7 @@ session_exists() {
 # lifecycle state through its workspace hook. Codex accepts queued follow-ups,
 # so an existing tmux session is sufficient.
 is_agent_ready() {
-    if ! session_exists "$AGENT_SESSION"; then
+    if ! session_exists "$CODEMATE_AGENT_SESSION"; then
         return 1
     fi
 
@@ -82,18 +82,18 @@ send_to_agent() {
     local message="$1"
 
     if [ "$CODEMATE_AGENT" = "codex" ]; then
-        tmux send-keys -t "$AGENT_SESSION" "$message"
-        tmux send-keys -t "$AGENT_SESSION" Enter
+        tmux send-keys -t "$CODEMATE_AGENT_SESSION" "$message"
+        tmux send-keys -t "$CODEMATE_AGENT_SESSION" Enter
         return 0
     fi
 
-    send_and_verify_command "$AGENT_SESSION" "$message" 3
+    send_and_verify_command "$CODEMATE_AGENT_SESSION" "$message" 3
 }
 
 # Load state from previous run
 load_state() {
-    if [ -f "$STATE_FILE" ]; then
-        source "$STATE_FILE"
+    if [ -f "$CODEMATE_PR_MONITOR_STATE_FILE" ]; then
+        source "$CODEMATE_PR_MONITOR_STATE_FILE"
     else
         LAST_CHECK_TIME=""
         CONSECUTIVE_FAILURES=0
@@ -108,7 +108,7 @@ load_state() {
 
 # Save state for next run
 save_state() {
-    cat > "$STATE_FILE" <<EOF
+    cat > "$CODEMATE_PR_MONITOR_STATE_FILE" <<EOF
 LAST_CHECK_TIME="$LAST_CHECK_TIME"
 CONSECUTIVE_FAILURES=$CONSECUTIVE_FAILURES
 LAST_ISSUE_COMMENT_ID="$LAST_ISSUE_COMMENT_ID"
@@ -222,7 +222,7 @@ check_issue_comments() {
 
         echo "$(date): Processing issue comment #$comment_id from $comment_user"
 
-        if session_exists "$AGENT_SESSION"; then
+        if session_exists "$CODEMATE_AGENT_SESSION"; then
             if [ "$CODEMATE_AGENT" = "claude" ]; then
                 ack_instruction="use /pr:ack-comments skill"
             else
@@ -276,7 +276,7 @@ check_pr_ready_for_review() {
 
     # PR is ready for review and doesn't have the label
     echo "$(date): PR is ready for review, notifying $AGENT_NAME"
-    if session_exists "$AGENT_SESSION"; then
+    if session_exists "$CODEMATE_AGENT_SESSION"; then
         if [ "$CODEMATE_AGENT" = "claude" ]; then
             update_instruction="use /pr:update skill"
         else
@@ -388,7 +388,7 @@ check_ci_status() {
     local failure_logs=""
     failure_logs=$(gh run view "$run_id" --log-failed 2>/dev/null | tail -100)
 
-    if session_exists "$AGENT_SESSION"; then
+    if session_exists "$CODEMATE_AGENT_SESSION"; then
         if [ "$CODEMATE_AGENT" = "claude" ]; then
             commit_instruction="using /git:commit skill"
         else
@@ -481,7 +481,7 @@ main() {
 
     if [ "$unsolved_count" -gt 0 ]; then
         echo "$(date): Unsolved PR comments detected ($unsolved_count)"
-        if session_exists "$AGENT_SESSION"; then
+        if session_exists "$CODEMATE_AGENT_SESSION"; then
             # Format comment details for the selected agent.
             comment_summary=$(echo "$comments_data" | jq -r '
                 map(

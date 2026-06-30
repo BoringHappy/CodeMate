@@ -22,8 +22,8 @@ RUN echo "* * * * * agent /usr/local/bin/setup/shell/monitor-pr.sh >> /tmp/pr-mo
     && chmod 0644 /etc/cron.d/pr-monitor
 
 # Environment variables for plugin configuration
-ENV DEFAULT_MARKETPLACES="BoringHappy/CodeMate"
-ENV DEFAULT_PLUGINS="git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
+ENV CODEMATE_DEFAULT_MARKETPLACES="BoringHappy/CodeMate"
+ENV CODEMATE_DEFAULT_PLUGINS="git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
 # Switch to agent user and install both supported coding agents.
 USER agent
