@@ -436,6 +436,9 @@ run_codemate() {
     while IFS= read -r -d '' config_entry; do
         local entry_name
         entry_name="$(basename "$config_entry")"
+        if [[ "$entry_name" != .* ]]; then
+            print_warning "$config_dir/$entry_name will be mounted to /home/agent/$entry_name; use a leading dot for hidden home config paths"
+        fi
         volume_mounts+=(-v "$config_entry:/home/agent/$entry_name")
     done < <(find "$config_dir" -mindepth 1 -maxdepth 1 -print0 | sort -z)
 
