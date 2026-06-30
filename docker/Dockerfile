@@ -27,6 +27,7 @@ ENV DEFAULT_PLUGINS="git@codemate,pr@codemate,dev@codemate,issue@codemate,worksp
 
 # Switch to agent user and install both supported coding agents.
 USER agent
+ENV PATH="/home/agent/.local/bin:${PATH}"
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @cometix/ccline
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh \
