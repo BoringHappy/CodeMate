@@ -188,22 +188,13 @@ setup_codemate_files() {
     print_info "Setting up CodeMate configuration..."
     echo ""
 
-    # Create global config directories
+    # Create global config directory
     if [ ! -d "$config_dir/.claude" ]; then
         mkdir -p "$config_dir/.claude"
         print_success "Created global config directory: $config_dir/.claude"
     else
         print_info "Global config directory already exists: $config_dir/.claude"
     fi
-
-    for shared_dir in .cache .codex .kube; do
-        if [ ! -d "$config_dir/$shared_dir" ]; then
-            mkdir -p "$config_dir/$shared_dir"
-            print_success "Created global config directory: $config_dir/$shared_dir"
-        else
-            print_info "Global config directory already exists: $config_dir/$shared_dir"
-        fi
-    done
 
     # Create .claude.json
     if [ ! -f "$config_dir/.claude.json" ]; then
@@ -341,7 +332,6 @@ run_codemate() {
     fi
 
     print_info "Using global configuration from: $config_dir"
-    mkdir -p "$config_dir/.cache" "$config_dir/.codex" "$config_dir/.kube"
 
     # Source .env file from current directory (project-specific)
     if [ -f "$current_dir/.env" ]; then
@@ -743,8 +733,7 @@ main() {
             echo "  1. Global config directory: $config_dir/.claude"
             echo "  2. Claude config file: $config_dir/.claude.json"
             echo "  3. Settings file: $config_dir/.claude/settings.json"
-            echo "  4. Shared Codex/.cache/kube directories under: $config_dir"
-            echo "  5. Project .env file: $current_dir/.env"
+            echo "  4. Project .env file: $current_dir/.env"
             echo ""
         fi
 

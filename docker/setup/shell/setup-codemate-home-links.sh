@@ -15,8 +15,6 @@ fi
 
 printf "${YELLOW}Setting up CodeMate home links from ${CODEMATE_HOME}...${RESET}\n"
 
-mkdir -p "$CODEMATE_HOME/.claude" "$CODEMATE_HOME/.cache" "$CODEMATE_HOME/.codex" "$CODEMATE_HOME/.kube"
-
 link_entry() {
     local src="$1"
     local name
