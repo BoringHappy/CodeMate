@@ -487,7 +487,7 @@ main() {
             # Format comment details for the selected agent.
             comment_summary=$(echo "$comments_data" | jq -r '
                 map(
-                    "- \(.path):\(.line // .original_line) by @\(.user.login):\n  \(.body | split("\n") | join("\n  "))"
+                    "- comment_id: \(.id)\n  path: \(.path)\n  line: \(.line // .original_line)\n  author: @\(.user.login)\n  body:\n  \(.body | split("\n") | join("\n  "))"
                 ) | join("\n\n")
             ')
 
@@ -496,7 +496,8 @@ main() {
             else
                 fix_instruction="use the pr plugin's fix-comments skill"
             fi
-            local message="Please $fix_instruction to address the following PR review comments:
+            local message="Please $fix_instruction to address the following PR review comments for PR #$pr_number.
+Use the provided comment_id values when replying to review threads; avoid fetching PR comments again unless the supplied context is insufficient.
 
 $comment_summary"
             send_to_agent "$message"

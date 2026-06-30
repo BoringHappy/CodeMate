@@ -9,7 +9,7 @@ Automatically address feedback from GitHub pull request comments.
 
 ## What it does
 
-1. **Reads PR comments**: Uses `/pr:get-details` skill to fetch and display all comments (both PR-level and code review comments) from the current pull request
+1. **Reads PR comments**: Uses comment details supplied in the user prompt when present. Only use `/pr:get-details` if the prompt does not include enough comment context.
 2. **Filters addressed comments**: Skips comment threads where the last reply starts with "CodeMate Replied:" (these have already been addressed)
 3. **Parses feedback**: Analyzes each unresolved comment to understand what needs to be fixed
 4. **Reads affected files**: Uses the Read tool to examine files mentioned in comments
@@ -34,17 +34,16 @@ fi
 - GitHub CLI (`gh`) must be installed and authenticated
 - Must have write access to the repository
 - Pull request must exist for the current branch
-- Requires `/pr:get-details` skill to be available
 - Requires `/git:commit` skill to be available
 
 ## Technical Details
 
-- Uses `/pr:get-details` skill to fetch both PR-level and code review comments in a formatted way
-- The `/pr:get-details` skill internally uses `gh pr view` and `gh api` to gather all comment information
+- When the prompt includes `comment_id` values, use those IDs directly for replies and do not fetch PR comments again unless required to understand the requested fix
+- If comment context is missing, use `/pr:get-details` to fetch both PR-level and code review comments in a formatted way
 - **Identifying addressed comments**: A comment thread is considered addressed if its last reply starts with "CodeMate Replied:"
 - Only processes unresolved comments (those without "CodeMate Replied:" in the last reply)
 - Uses `/git:commit` skill to stage, commit, and push changes to the remote branch
-- Replies use `gh api -X POST repos/:owner/:repo/pulls/{pr}/comments/{comment_id}/replies` to thread responses
+- Replies use `gh api -X POST repos/:owner/:repo/pulls/{pr}/comments/{comment_id}/replies` to thread responses, where `{pr}` and `{comment_id}` come from the prompt when provided
 - **Reply Format**: All replies must start with "CodeMate Replied:" to mark threads as resolved
 - Handles multiple comments in a single run
 
