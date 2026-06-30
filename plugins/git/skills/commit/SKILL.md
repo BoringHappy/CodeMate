@@ -34,7 +34,7 @@ Commit co-author trailer:
    - Is concise but descriptive
    - Follows the style of recent commits if a pattern exists
 4. If the commit co-author trailer shown above is not empty, append it to the commit message body after a blank line
-   - Example: `git commit -m "Add feature" -m "Co-authored-by: Name <email@example.com>"`
+   - Example when `CODEMATE_CO_AUTHOR_BY="Name <email@example.com>"`: `git commit -m "Add feature" -m "Co-authored-by: $CODEMATE_CO_AUTHOR_BY"`
    - If `CODEMATE_CO_AUTHOR_BY` does not start with `Co-authored-by:`, prepend `Co-authored-by: ` before committing
 5. Push to the remote using `git push`
 
