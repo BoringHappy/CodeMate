@@ -21,6 +21,7 @@ CODEMATE_PR_TITLE=""
 CODEMATE_ISSUE_NUMBER=""
 CODEMATE_QUERY=""
 CODEMATE_NO_PR=""
+CODEMATE_AGENT="${CODEMATE_AGENT:-}"
 DOCKER_EXTRA_PARAMS=()
 CODEMATE_IMAGE="${CODEMATE_IMAGE:-ghcr.io/boringhappy/codemate:latest}"
 BUILD_LOCAL=false
@@ -84,6 +85,9 @@ create_env_file() {
 
 # Optional: Default repository URL
 # CODEMATE_GIT_REPO_URL=
+
+# Runtime agent: claude (default) or codex
+# CODEMATE_AGENT=claude
 
 # Anthropic API Configuration
 $(if [ -n "$anthropic_token" ]; then echo "ANTHROPIC_AUTH_TOKEN=$anthropic_token"; else echo "# ANTHROPIC_AUTH_TOKEN="; fi)
@@ -339,6 +343,7 @@ run_codemate() {
     local launcher_issue_number="$CODEMATE_ISSUE_NUMBER"
     local launcher_query="$CODEMATE_QUERY"
     local launcher_no_pr="$CODEMATE_NO_PR"
+    local launcher_agent="$CODEMATE_AGENT"
 
     # Source .env file from current directory (project-specific)
     if [ -f "$current_dir/.env" ]; then
@@ -356,6 +361,21 @@ run_codemate() {
     CODEMATE_ISSUE_NUMBER="$launcher_issue_number"
     CODEMATE_QUERY="$launcher_query"
     CODEMATE_NO_PR="$launcher_no_pr"
+    if [ -n "$launcher_agent" ]; then
+        CODEMATE_AGENT="$launcher_agent"
+    fi
+
+    if [ -n "${CODEMATE_AGENT:-}" ]; then
+        case "$CODEMATE_AGENT" in
+            claude|codex)
+                ;;
+            *)
+                print_error "Invalid CODEMATE_AGENT: $CODEMATE_AGENT"
+                echo "Expected: claude or codex"
+                exit 1
+                ;;
+        esac
+    fi
 
     # Require at least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP so the
     # container can enforce its access check (it passes if either one matches).
@@ -441,6 +461,12 @@ run_codemate() {
     # Create new container
     print_info "Creating new container $CONTAINER_NAME..."
 
+    local agent_env_args=()
+    if [ -n "${CODEMATE_AGENT:-}" ]; then
+        agent_env_args=(-e "CODEMATE_AGENT=$CODEMATE_AGENT")
+        print_info "Using agent: $CODEMATE_AGENT"
+    fi
+
     # Build volume mounts using global config. Mount the parent for visibility,
     # then mount each top-level entry into $HOME with its original basename.
     local volume_mounts=(
@@ -493,6 +519,7 @@ run_codemate() {
         -e "CODEMATE_ISSUE_NUMBER=$CODEMATE_ISSUE_NUMBER"
         -e "CODEMATE_QUERY=$CODEMATE_QUERY"
         -e "CODEMATE_NO_PR=$CODEMATE_NO_PR"
+        "${agent_env_args[@]}"
         -e "CODEMATE_GITHUB_TOKEN=$CODEMATE_GITHUB_TOKEN"
         -e "CODEMATE_ALLOW_COUNTRY=$CODEMATE_ALLOW_COUNTRY"
         -e "CODEMATE_ALLOW_IP=$CODEMATE_ALLOW_IP"
@@ -510,7 +537,7 @@ run_codemate() {
 # Function to show usage
 show_usage() {
     cat << EOF
-CodeMate - Docker-based Claude Code environment
+CodeMate - Docker-based Claude Code and Codex environment
 
 Usage: codemate [OPTIONS]
 
@@ -521,7 +548,8 @@ Options:
   --pr NUMBER          Existing PR number to work on
   --pr-title TITLE     PR title (optional)
   --issue NUMBER       GitHub issue number to work on (creates branch issue-NUMBER)
-  --query TEXT         Initial query to send to Claude after startup
+  --query TEXT         Initial query to send to the selected agent after startup
+  --agent AGENT        Runtime agent to launch: claude or codex (overrides CODEMATE_AGENT in .env)
   --no-pr              Skip PR creation and branch push for new branches
   --docker-param PARAM Extra Docker run parameter, can be used multiple times
                        e.g. --docker-param "--network bridge" --docker-param "--memory 2g"
@@ -542,10 +570,11 @@ Environment Variables:
   CODEMATE_GITHUB_TOKEN         GitHub personal access token
   CODEMATE_GIT_USER_NAME        Git commit author name
   CODEMATE_GIT_USER_EMAIL       Git commit author email
+  CODEMATE_AGENT       Runtime agent to launch: claude (default) or codex
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
   CODEMATE_ALLOW_COUNTRY  Comma-separated list of ip-api.com 'countryCode' values the container is
                        allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
-                       before starting Claude; if neither the IP nor country is allowlisted it files a
+                       before starting the agent; if neither the IP nor country is allowlisted it files a
                        GitHub issue and exits. At least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP
                        is required.
   CODEMATE_ALLOW_IP    Comma-separated list of exact IPs or IPv4 CIDR ranges the container is allowed
@@ -567,6 +596,9 @@ Examples:
 
   # Run with branch name
   codemate --branch feature/my-feature
+
+  # Run with Codex instead of the default Claude runtime
+  codemate --branch feature/my-feature --agent codex
 
   # Run with existing PR
   codemate --pr 123
@@ -665,6 +697,24 @@ main() {
                     exit 1
                 fi
                 CODEMATE_QUERY="$2"
+                shift 2
+                ;;
+            --agent)
+                if [ -z "$2" ]; then
+                    print_error "--agent requires a value: claude or codex"
+                    show_usage
+                    exit 1
+                fi
+                case "$2" in
+                    claude|codex)
+                        CODEMATE_AGENT="$2"
+                        ;;
+                    *)
+                        print_error "Invalid --agent value: $2"
+                        echo "Expected: claude or codex"
+                        exit 1
+                        ;;
+                esac
                 shift 2
                 ;;
             --no-pr)

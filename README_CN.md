@@ -74,8 +74,7 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 codemate --branch feature/your-branch
 
 # 使用 Codex（默认运行 Claude）
-echo 'CODEMATE_AGENT=codex' >> .env
-codemate --branch feature/your-branch
+codemate --branch feature/your-branch --agent codex
 
 # 使用现有 PR 运行
 codemate --pr 123
@@ -240,7 +239,7 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 | `CODEMATE_CUSTOM_MARKETPLACES` | 否 | 逗号分隔的自定义插件市场仓库列表（例如：`username/repo1,org/repo2`） |
 | `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
 
-`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY` 和 `CODEMATE_NO_PR` 由 `codemate` 启动脚本根据 CLI 参数创建并传入容器，不应直接在 `.env` 中设置。
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY` 和 `CODEMATE_NO_PR` 由 `codemate` 启动脚本根据 CLI 参数创建并传入容器，不应直接在 `.env` 中设置。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`。
 
 
 ## 工作原理

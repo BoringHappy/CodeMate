@@ -76,8 +76,7 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 codemate --branch feature/your-branch
 
 # Run Codex instead of the default Claude runtime
-echo 'CODEMATE_AGENT=codex' >> .env
-codemate --branch feature/your-branch
+codemate --branch feature/your-branch --agent codex
 
 # Run with a custom PR title
 codemate --branch feature/your-branch --pr-title "My feature title"
@@ -217,7 +216,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
-`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` are created by the `codemate` launcher from CLI options and passed into the container; do not set them directly in `.env`.
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` are created by the `codemate` launcher from CLI options and passed into the container; do not set them directly in `.env`. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run.
 
 
 ## How It Works
