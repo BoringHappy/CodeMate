@@ -90,14 +90,14 @@ You can customize which marketplaces and plugins are installed by default using 
 
 ```bash
 # Override default marketplaces (comma-separated GitHub repo paths)
-DEFAULT_MARKETPLACES=BoringHappy/CodeMate
+CODEMATE_DEFAULT_MARKETPLACES=BoringHappy/CodeMate
 
 # Override default plugins (comma-separated plugin@marketplace)
-DEFAULT_PLUGINS=git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate
+CODEMATE_DEFAULT_PLUGINS=git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate
 
 # Set to empty to disable all defaults
-DEFAULT_MARKETPLACES=
-DEFAULT_PLUGINS=
+CODEMATE_DEFAULT_MARKETPLACES=
+CODEMATE_DEFAULT_PLUGINS=
 ```
 
 **Custom Plugins:**
@@ -106,10 +106,10 @@ You can add additional custom plugin marketplaces and plugins by configuring env
 
 ```bash
 # Add custom marketplaces (comma-separated GitHub repo paths)
-CUSTOM_MARKETPLACES=username/my-marketplace,org/another-marketplace
+CODEMATE_CUSTOM_MARKETPLACES=username/my-marketplace,org/another-marketplace
 
 # Add custom plugins to install (comma-separated plugin names)
-CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
+CODEMATE_CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
 ```
 
 Custom marketplaces and plugins are added/installed after the default ones during container startup. The setup script will automatically:

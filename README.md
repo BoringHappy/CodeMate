@@ -125,7 +125,7 @@ The setup command will:
 
 **Repository URL Resolution**: The script determines the repository URL in this priority order:
 1. `--repo` command-line argument (highest priority)
-2. `GIT_REPO_URL` environment variable or `.env` file
+2. `CODEMATE_GIT_REPO_URL` environment variable or `.env` file
 3. Current directory's git remote origin URL (auto-detected)
 4. If none are available, an error is raised
 
@@ -200,16 +200,16 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GIT_REPO_URL` | No | Repository URL (defaults to current repo's remote) |
-| `UPSTREAM_REPO_URL` | No | Upstream repository URL (for fork-based workflows) |
+| `CODEMATE_GIT_REPO_URL` | No | Repository URL (defaults to current repo's remote) |
+| `CODEMATE_UPSTREAM_REPO_URL` | No | Upstream repository URL (for fork-based workflows) |
 | `BRANCH_NAME` | No | Branch to work on |
 | `PR_NUMBER` | No | Existing PR number to work on |
 | `PR_TITLE` | No | PR title for newly created PRs |
 | `ISSUE_NUMBER` | No | GitHub issue number (creates branch `issue-NUMBER` and uses `/issue:read-issue` skill) |
 | `NO_PR` | No | Set to `true` to skip PR creation and branch push for new branches |
 | `CODEMATE_GITHUB_TOKEN` | Auto | GitHub personal access token (defaults to `gh auth token` if not provided) |
-| `GIT_USER_NAME` | Auto | Git commit author name (defaults to `git config user.name` if not provided) |
-| `GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
+| `CODEMATE_GIT_USER_NAME` | Auto | Git commit author name (defaults to `git config user.name` if not provided) |
+| `CODEMATE_GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
 | `SLACK_WEBHOOK` | No | Slack Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
@@ -217,10 +217,10 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `ANTHROPIC_AUTH_TOKEN` | No | Anthropic API token (for custom API endpoints) |
 | `ANTHROPIC_BASE_URL` | No | Anthropic API base URL (for custom API endpoints) |
 | `QUERY` | No | Initial query to send to the selected agent after startup |
-| `DEFAULT_MARKETPLACES` | No | Comma-separated default plugin marketplaces (default: `BoringHappy/CodeMate`) |
-| `DEFAULT_PLUGINS` | No | Comma-separated default plugins (default: `git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`) |
-| `CUSTOM_MARKETPLACES` | No | Comma-separated list of custom plugin marketplace repositories (e.g., `username/repo1,org/repo2`) |
-| `CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
+| `CODEMATE_DEFAULT_MARKETPLACES` | No | Comma-separated default plugin marketplaces (default: `BoringHappy/CodeMate`) |
+| `CODEMATE_DEFAULT_PLUGINS` | No | Comma-separated default plugins (default: `git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`) |
+| `CODEMATE_CUSTOM_MARKETPLACES` | No | Comma-separated list of custom plugin marketplace repositories (e.g., `username/repo1,org/repo2`) |
+| `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
 
@@ -267,7 +267,7 @@ On startup, the container:
 | `/issue:triage-issue` | Apply priority and category labels based on content analysis |
 | `/issue:classify-issue` | Post clarifying questions for ambiguous issues and add `needs-more-info` label |
 
-**PM Plugin** (`pm@codemate`) — _recommended for local Claude Code, not bundled in the Docker image. Install via `claude plugin install pm@codemate` or add to `CUSTOM_PLUGINS` if you want it inside the container._
+**PM Plugin** (`pm@codemate`) — _recommended for local Claude Code, not bundled in the Docker image. Install via `claude plugin install pm@codemate` or add to `CODEMATE_CUSTOM_PLUGINS` if you want it inside the container._
 | Command | Description |
 |---------|-------------|
 | `/pm:spec-list` | List all spec GitHub Issues with their status and task counts |
@@ -300,24 +300,24 @@ You can extend CodeMate with your own custom plugins by adding them to your `.en
 
 ```bash
 # Override default marketplaces (optional)
-DEFAULT_MARKETPLACES=BoringHappy/CodeMate
+CODEMATE_DEFAULT_MARKETPLACES=BoringHappy/CodeMate
 
 # Override default plugins (optional)
-DEFAULT_PLUGINS=git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate
+CODEMATE_DEFAULT_PLUGINS=git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate
 
 # Set to empty to disable all defaults (optional)
-DEFAULT_MARKETPLACES=
-DEFAULT_PLUGINS=
+CODEMATE_DEFAULT_MARKETPLACES=
+CODEMATE_DEFAULT_PLUGINS=
 
 # Add custom plugin marketplaces (comma-separated GitHub repo paths)
-CUSTOM_MARKETPLACES=username/my-marketplace,org/another-marketplace
+CODEMATE_CUSTOM_MARKETPLACES=username/my-marketplace,org/another-marketplace
 
 # Add custom plugins to install (comma-separated plugin names)
-CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
+CODEMATE_CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
 ```
 
 **How it works:**
-1. By default, CodeMate installs marketplaces from `DEFAULT_MARKETPLACES` and plugins from `DEFAULT_PLUGINS`
+1. By default, CodeMate installs marketplaces from `CODEMATE_DEFAULT_MARKETPLACES` and plugins from `CODEMATE_DEFAULT_PLUGINS`
 2. You can override these defaults by setting the environment variables to different values
 3. You can disable all defaults by setting them to empty strings
 4. Custom marketplaces and plugins are added after defaults during container startup
@@ -329,8 +329,8 @@ CUSTOM_PLUGINS=my-plugin@my-marketplace,another-plugin@my-marketplace
 If you have a custom plugin marketplace at `github.com/myorg/my-plugins` with a plugin called `deploy`, you would configure:
 
 ```bash
-CUSTOM_MARKETPLACES=myorg/my-plugins
-CUSTOM_PLUGINS=deploy@my-plugins
+CODEMATE_CUSTOM_MARKETPLACES=myorg/my-plugins
+CODEMATE_CUSTOM_PLUGINS=deploy@my-plugins
 ```
 
 Then use it in Claude Code:

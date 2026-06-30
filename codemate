@@ -13,8 +13,8 @@ BLUE='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Default values
-GIT_REPO_URL="${GIT_REPO_URL:-$(git config --get remote.origin.url 2>/dev/null || echo '')}"
-UPSTREAM_REPO_URL="${UPSTREAM_REPO_URL:-}"
+CODEMATE_GIT_REPO_URL="${CODEMATE_GIT_REPO_URL:-$(git config --get remote.origin.url 2>/dev/null || echo '')}"
+CODEMATE_UPSTREAM_REPO_URL="${CODEMATE_UPSTREAM_REPO_URL:-}"
 BRANCH_NAME="${BRANCH_NAME:-}"
 PR_NUMBER="${PR_NUMBER:-}"
 PR_TITLE="${PR_TITLE:-}"
@@ -83,7 +83,7 @@ create_env_file() {
 # CodeMate Environment Configuration
 
 # Optional: Default repository URL
-# GIT_REPO_URL=
+# CODEMATE_GIT_REPO_URL=
 
 # Anthropic API Configuration
 $(if [ -n "$anthropic_token" ]; then echo "ANTHROPIC_AUTH_TOKEN=$anthropic_token"; else echo "# ANTHROPIC_AUTH_TOKEN="; fi)
@@ -367,10 +367,10 @@ run_codemate() {
     fi
 
     # Get git user info
-    GIT_USER_NAME="${GIT_USER_NAME:-$(git config user.name)}"
-    GIT_USER_EMAIL="${GIT_USER_EMAIL:-$(git config user.email)}"
+    CODEMATE_GIT_USER_NAME="${CODEMATE_GIT_USER_NAME:-$(git config user.name)}"
+    CODEMATE_GIT_USER_EMAIL="${CODEMATE_GIT_USER_EMAIL:-$(git config user.email)}"
 
-    if [ -z "$GIT_USER_NAME" ] || [ -z "$GIT_USER_EMAIL" ]; then
+    if [ -z "$CODEMATE_GIT_USER_NAME" ] || [ -z "$CODEMATE_GIT_USER_EMAIL" ]; then
         print_error "Git user name or email not configured"
         echo "Please set them in .env or run:"
         printf "  ${BLUE}git config --global user.name \"Your Name\"${NC}\n"
@@ -379,7 +379,7 @@ run_codemate() {
     fi
 
     # Extract repo name from git URL
-    REPO_NAME=$(echo "$GIT_REPO_URL" | sed 's/\.git$//' | sed 's|.*/||')
+    REPO_NAME=$(echo "$CODEMATE_GIT_REPO_URL" | sed 's/\.git$//' | sed 's|.*/||')
 
     # Determine container name (include repo name to avoid conflicts between repos with same branch)
     local branch_for_name="${BRANCH_NAME:-main}"
@@ -387,10 +387,10 @@ run_codemate() {
     local branch_sanitized=$(echo "$branch_for_name" | sed 's/[^a-zA-Z0-9_-]/-/g')
     CONTAINER_NAME="codemate-${repo_for_name}-${branch_sanitized}"
 
-    # Build extra docker params from CLI flags and DOCKER_PARAMS env var
+    # Build extra docker params from CLI flags and CODEMATE_DOCKER_PARAMS env var
     local docker_run_extra=("${DOCKER_EXTRA_PARAMS[@]}")
-    if [ -n "${DOCKER_PARAMS:-}" ]; then
-        read -ra _env_params <<< "$DOCKER_PARAMS"
+    if [ -n "${CODEMATE_DOCKER_PARAMS:-}" ]; then
+        read -ra _env_params <<< "$CODEMATE_DOCKER_PARAMS"
         docker_run_extra+=("${_env_params[@]}")
     fi
     if [ ${#docker_run_extra[@]} -gt 0 ]; then
@@ -471,8 +471,8 @@ run_codemate() {
         -it
         "${volume_mounts[@]}"
         $env_file_flag
-        -e "GIT_REPO_URL=$GIT_REPO_URL"
-        -e "UPSTREAM_REPO_URL=$UPSTREAM_REPO_URL"
+        -e "CODEMATE_GIT_REPO_URL=$CODEMATE_GIT_REPO_URL"
+        -e "CODEMATE_UPSTREAM_REPO_URL=$CODEMATE_UPSTREAM_REPO_URL"
         -e "BRANCH_NAME=$BRANCH_NAME"
         -e "PR_NUMBER=$PR_NUMBER"
         -e "PR_TITLE=$PR_TITLE"
@@ -482,8 +482,8 @@ run_codemate() {
         -e "CODEMATE_GITHUB_TOKEN=$CODEMATE_GITHUB_TOKEN"
         -e "CODEMATE_ALLOW_COUNTRY=$CODEMATE_ALLOW_COUNTRY"
         -e "CODEMATE_ALLOW_IP=$CODEMATE_ALLOW_IP"
-        -e "GIT_USER_NAME=$GIT_USER_NAME"
-        -e "GIT_USER_EMAIL=$GIT_USER_EMAIL"
+        -e "CODEMATE_GIT_USER_NAME=$CODEMATE_GIT_USER_NAME"
+        -e "CODEMATE_GIT_USER_EMAIL=$CODEMATE_GIT_USER_EMAIL"
         -e "TMPDIR=/home/agent/.claude/tmp"
         -w "/home/agent/$REPO_NAME"
         "$CODEMATE_IMAGE"
@@ -523,16 +523,16 @@ Options:
   --help               Show this help message
 
 Environment Variables:
-  GIT_REPO_URL         Repository URL (defaults to current repo's remote)
-  UPSTREAM_REPO_URL    Upstream repository URL (for fork workflows)
+  CODEMATE_GIT_REPO_URL         Repository URL (defaults to current repo's remote)
+  CODEMATE_UPSTREAM_REPO_URL    Upstream repository URL (for fork workflows)
   BRANCH_NAME          Branch to work on
   PR_NUMBER            Existing PR number
   PR_TITLE             PR title
   ISSUE_NUMBER         GitHub issue number
   QUERY                Initial query to send to Claude after startup
   CODEMATE_GITHUB_TOKEN         GitHub personal access token
-  GIT_USER_NAME        Git commit author name
-  GIT_USER_EMAIL       Git commit author email
+  CODEMATE_GIT_USER_NAME        Git commit author name
+  CODEMATE_GIT_USER_EMAIL       Git commit author email
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
   CODEMATE_ALLOW_COUNTRY  Comma-separated list of ip-api.com 'countryCode' values the container is
                        allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
@@ -542,7 +542,7 @@ Environment Variables:
   CODEMATE_ALLOW_IP    Comma-separated list of exact IPs or IPv4 CIDR ranges the container is allowed
                        to run from (e.g. 203.0.113.7,198.51.100.0/24). The access check passes if EITHER
                        this or CODEMATE_ALLOW_COUNTRY matches. At least one of the two is required.
-  DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
+  CODEMATE_DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
   CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.aws:/home/agent/.aws")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops
 
@@ -678,7 +678,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                GIT_REPO_URL="$2"
+                CODEMATE_GIT_REPO_URL="$2"
                 shift 2
                 ;;
             --upstream)
@@ -687,7 +687,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                UPSTREAM_REPO_URL="$2"
+                CODEMATE_UPSTREAM_REPO_URL="$2"
                 shift 2
                 ;;
             --mount)
@@ -784,7 +784,7 @@ main() {
         fi
 
         # Determine which repo to read the issue from (upstream if set, otherwise fork/origin)
-        ISSUE_REPO_URL="${UPSTREAM_REPO_URL:-$GIT_REPO_URL}"
+        ISSUE_REPO_URL="${CODEMATE_UPSTREAM_REPO_URL:-$CODEMATE_GIT_REPO_URL}"
 
         # Extract repo owner and name for issue URL
         if [ -n "$ISSUE_REPO_URL" ]; then
@@ -814,12 +814,12 @@ main() {
         exit 1
     fi
 
-    if [ -z "$GIT_REPO_URL" ]; then
-        print_error "GIT_REPO_URL not set"
+    if [ -z "$CODEMATE_GIT_REPO_URL" ]; then
+        print_error "CODEMATE_GIT_REPO_URL not set"
         echo ""
         echo "The repository URL can be provided in three ways (in priority order):"
         echo "  1. Use --repo option: codemate --repo https://github.com/user/repo.git --branch xyz"
-        echo "  2. Set GIT_REPO_URL in .env file"
+        echo "  2. Set CODEMATE_GIT_REPO_URL in .env file"
         echo "  3. Run from a git repository directory (auto-detects remote origin)"
         echo ""
         exit 1

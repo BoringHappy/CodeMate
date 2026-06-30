@@ -49,8 +49,8 @@ def get_pr_template(workspace):
 
 
 def main():
-    git_repo_url = os.environ["GIT_REPO_URL"]
-    upstream_repo_url = os.getenv("UPSTREAM_REPO_URL", "")
+    git_repo_url = os.environ["CODEMATE_GIT_REPO_URL"]
+    upstream_repo_url = os.getenv("CODEMATE_UPSTREAM_REPO_URL", "")
     pr_title = os.getenv("PR_TITLE", "")
 
     branch_name = os.getenv("BRANCH_NAME", "")
@@ -58,7 +58,7 @@ def main():
     no_pr = os.getenv("NO_PR", "")
 
     if not branch_name and not pr_number:
-        print(f"{RED}Skipping git PR setup: GIT_REPO_URL or BRANCH_NAME/PR_NUMBER not set{RESET}")
+        print(f"{RED}Skipping git PR setup: CODEMATE_GIT_REPO_URL or BRANCH_NAME/PR_NUMBER not set{RESET}")
         sys.exit(0)
 
     # Validate branch name is not main/master or default branch
