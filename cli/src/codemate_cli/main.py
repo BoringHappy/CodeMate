@@ -14,6 +14,8 @@ from types import SimpleNamespace
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import typer
+from rich.console import Console
+from rich.table import Table
 
 
 DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
@@ -27,6 +29,7 @@ RED = "\033[0;31m"
 NC = "\033[0m"
 
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
+console = Console()
 
 
 class Agent(str, Enum):
@@ -312,6 +315,52 @@ def split_words(text: str) -> List[str]:
     return shlex.split(text) if text else []
 
 
+def split_csv(text: str) -> List[str]:
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def target_label(config: Mapping[str, ResolvedValue]) -> str:
+    branch = value(config, "CODEMATE_BRANCH_NAME")
+    pr = value(config, "CODEMATE_PR_NUMBER")
+    issue = value(config, "CODEMATE_ISSUE_NUMBER")
+    if branch:
+        return f"branch {branch}"
+    if pr:
+        return f"PR #{pr}"
+    if issue:
+        return f"issue #{issue}"
+    return "none"
+
+
+def print_launch_summary(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
+    default_marketplaces = split_csv(value(config, "CODEMATE_DEFAULT_MARKETPLACES"))
+    custom_marketplaces = split_csv(value(config, "CODEMATE_CUSTOM_MARKETPLACES"))
+    default_plugins = split_csv(value(config, "CODEMATE_DEFAULT_PLUGINS"))
+    custom_plugins = split_csv(value(config, "CODEMATE_CUSTOM_PLUGINS"))
+    mounts = args.mount or split_words(value(config, "CODEMATE_MOUNTS"))
+    docker_params = args.docker_param or split_words(value(config, "CODEMATE_DOCKER_PARAMS"))
+    allow_sources = [
+        label
+        for label, key in (("country", "CODEMATE_ALLOW_COUNTRY"), ("IP", "CODEMATE_ALLOW_IP"))
+        if value(config, key)
+    ]
+    extra_env_count = sum(1 for item in config.values() if item.field is None)
+
+    table = Table(title="CodeMate Launch", show_header=False, box=None, padding=(0, 1))
+    table.add_column("Setting", style="cyan", no_wrap=True)
+    table.add_column("Value")
+    table.add_row("Target", target_label(config))
+    table.add_row("Agent", value(config, "CODEMATE_AGENT"))
+    table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
+    table.add_row("Image", value(config, "CODEMATE_IMAGE"))
+    table.add_row("Plugins", f"{len(default_plugins)} default, {len(custom_plugins)} custom")
+    table.add_row("Marketplaces", f"{len(default_marketplaces)} default, {len(custom_marketplaces)} custom")
+    table.add_row("Runtime extras", f"{len(mounts)} custom mount(s), {len(docker_params)} docker param(s)")
+    table.add_row("Extra env", f"{extra_env_count} var(s)")
+    table.add_row("Allowlist", ", ".join(allow_sources))
+    console.print(table)
+
+
 def check_prerequisites(config: Mapping[str, ResolvedValue]) -> None:
     missing = [name for name in ("docker", "git", "gh") if shutil.which(name) is None]
     if missing:
@@ -469,6 +518,7 @@ def run_codemate(args: SimpleNamespace) -> None:
     env_file.close()
     try:
         cmd = docker_command(config, args, env_file.name)
+        print_launch_summary(config, args)
         if args.dry_run:
             print(" ".join(shlex.quote(part) for part in cmd).replace(env_file.name, "<generated-env-file>"))
             return

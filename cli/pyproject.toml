@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "CodeMate Docker launcher"
 requires-python = ">=3.9"
 dependencies = [
+  "rich>=13.0",
   "typer>=0.12",
 ]
 

@@ -50,15 +50,25 @@ Install the Python CLI globally with `uv`:
 ```bash
 # Recommended
 uv tool install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
+```
 
-# Alternative if you use pipx
+Upgrade an existing `uv` tool installation with:
+
+```bash
+uv tool upgrade codemate-cli
+```
+
+If you prefer `pipx`, install with:
+
+```bash
 pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
+```
 
+Then run the one-time global setup:
+
+```bash
 # One-time global setup
 codemate --setup
-
-# Update to latest version
-uv tool upgrade codemate-cli
 ```
 
 The legacy shell launcher remains at the repository root for compatibility; new CLI work lives in `cli/`.
