@@ -159,7 +159,7 @@ check_pr_comments() {
             map(select(.user.login | endswith(\"[bot]\") | not)) |
             group_by(.in_reply_to_id // .id) |
             map(
-                if (.[-1].body | startswith(\"Claude Replied:\") or startswith(\"CodeMate Replied:\")) then
+                if (.[-1].body | startswith(\"CodeMate Replied:\")) then
                     empty
                 else
                     .[-1]
@@ -192,14 +192,14 @@ check_issue_comments() {
             comments=$(gh api repos/:owner/:repo/issues/"$pr_number"/comments --jq "
                 map(select(.id > $LAST_ISSUE_COMMENT_ID)) |
                 map(select(.user.login | endswith(\"[bot]\") | not)) |
-                map(select((.body | startswith(\"Claude Replied:\") or startswith(\"CodeMate Replied:\")) | not)) |
+                map(select(.body | startswith(\"CodeMate Replied:\") | not)) |
                 map(select(.reactions.eyes == 0)) |
                 sort_by(.id)
             " 2>/dev/null)
         else
             comments=$(gh api repos/:owner/:repo/issues/"$pr_number"/comments --jq "
                 map(select(.user.login | endswith(\"[bot]\") | not)) |
-                map(select((.body | startswith(\"Claude Replied:\") or startswith(\"CodeMate Replied:\")) | not)) |
+                map(select(.body | startswith(\"CodeMate Replied:\") | not)) |
                 map(select(.reactions.eyes == 0)) |
                 sort_by(.id)
             " 2>/dev/null)
