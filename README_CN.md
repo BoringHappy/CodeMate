@@ -43,14 +43,14 @@ CodeMate 通过在隔离的 Docker 容器中运行 Claude Code 来解决这个�
 
 #### 全局安装（推荐）
 
-使用 `uv` 全局安装 Python CLI：
+使用 `uv` 全局安装或升级 Python CLI：
 
 ```bash
 # 推荐方式
-uv tool install git+https://github.com/BoringHappy/CodeMate.git
+uv tool install --upgrade git+https://github.com/BoringHappy/CodeMate.git
 ```
 
-使用 `uv` 安装后，可通过以下命令升级：
+如果 CodeMate 已经安装，也可以通过包名升级：
 
 ```bash
 uv tool upgrade codemate-cli

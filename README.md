@@ -45,14 +45,14 @@ On macOS, you need a Docker runtime since Docker doesn't run natively. Choose on
 
 #### Global Installation (Recommended)
 
-Install the Python CLI globally with `uv`:
+Install or upgrade the Python CLI globally with `uv`:
 
 ```bash
 # Recommended
-uv tool install git+https://github.com/BoringHappy/CodeMate.git
+uv tool install --upgrade git+https://github.com/BoringHappy/CodeMate.git
 ```
 
-Upgrade an existing `uv` tool installation with:
+If CodeMate is already installed, you can also upgrade it by package name:
 
 ```bash
 uv tool upgrade codemate-cli
