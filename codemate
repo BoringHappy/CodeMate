@@ -427,11 +427,20 @@ run_codemate() {
     # Create new container
     print_info "Creating new container $CONTAINER_NAME..."
 
-    # Build volume mounts using global config
+    # Build volume mounts using global config. Mount the parent for visibility,
+    # then mount each top-level entry into $HOME with its original basename.
     local volume_mounts=(
-        -v "$config_dir/.claude:/home/agent/.claude"
-        -v "$config_dir/.claude.json:/home/agent/.claude.json"
+        -v "$config_dir:/home/agent/.codemate"
     )
+
+    while IFS= read -r -d '' config_entry; do
+        local entry_name
+        entry_name="$(basename "$config_entry")"
+        if [[ "$entry_name" != .* ]]; then
+            print_warning "$config_dir/$entry_name will be mounted to /home/agent/$entry_name; use a leading dot for hidden home config paths"
+        fi
+        volume_mounts+=(-v "$config_entry:/home/agent/$entry_name")
+    done < <(find "$config_dir" -mindepth 1 -maxdepth 1 -print0 | sort -z)
 
     # Mount skills directory if it exists in current directory
     if [ -d "$current_dir/skills" ]; then
@@ -534,7 +543,7 @@ Environment Variables:
                        to run from (e.g. 203.0.113.7,198.51.100.0/24). The access check passes if EITHER
                        this or CODEMATE_ALLOW_COUNTRY matches. At least one of the two is required.
   DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
-  CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.kube:/home/agent/.kube $HOME/.aws:/home/agent/.aws")
+  CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.aws:/home/agent/.aws")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops
 
 Examples:
@@ -566,7 +575,7 @@ Examples:
   codemate --branch feature/xyz --mount ~/data:/data --mount ~/config:/config
 
   # Set default mounts in .env so every run picks them up
-  # echo 'CODEMATE_MOUNTS="$HOME/.kube:/home/agent/.kube $HOME/.aws:/home/agent/.aws"' >> .env
+  # echo 'CODEMATE_MOUNTS="$HOME/.aws:/home/agent/.aws"' >> .env
 
   # Run with custom image
   codemate --branch feature/xyz --image ghcr.io/boringhappy/codemate:v1.0.0
