@@ -82,7 +82,9 @@ send_to_agent() {
     local message="$1"
 
     if [ "$CODEMATE_AGENT" = "codex" ]; then
-        tmux send-keys -t "$CODEMATE_AGENT_SESSION" "$message"
+        printf "%s" "$message" | tmux load-buffer -b codemate-monitor-prompt -
+        tmux paste-buffer -d -b codemate-monitor-prompt -t "$CODEMATE_AGENT_SESSION"
+        sleep 0.2
         tmux send-keys -t "$CODEMATE_AGENT_SESSION" Enter
         return 0
     fi
@@ -157,7 +159,7 @@ check_pr_comments() {
             map(select(.user.login | endswith(\"[bot]\") | not)) |
             group_by(.in_reply_to_id // .id) |
             map(
-                if (.[-1].body | startswith(\"Claude Replied:\")) then
+                if (.[-1].body | startswith(\"CodeMate Replied:\")) then
                     empty
                 else
                     .[-1]
@@ -183,21 +185,21 @@ check_issue_comments() {
     local pr_number="$1"
 
     # Fetch issue comments with reactions in a single API call
-    # Filter out comments that: are already processed, start with "Claude Replied:", or have eyes reaction
+    # Filter out comments that: are already processed, start with an agent reply marker, or have eyes reaction
     local comments=""
     for attempt in 1 2 3; do
         if [ -n "$LAST_ISSUE_COMMENT_ID" ]; then
             comments=$(gh api repos/:owner/:repo/issues/"$pr_number"/comments --jq "
                 map(select(.id > $LAST_ISSUE_COMMENT_ID)) |
                 map(select(.user.login | endswith(\"[bot]\") | not)) |
-                map(select(.body | startswith(\"Claude Replied:\") | not)) |
+                map(select(.body | startswith(\"CodeMate Replied:\") | not)) |
                 map(select(.reactions.eyes == 0)) |
                 sort_by(.id)
             " 2>/dev/null)
         else
             comments=$(gh api repos/:owner/:repo/issues/"$pr_number"/comments --jq "
                 map(select(.user.login | endswith(\"[bot]\") | not)) |
-                map(select(.body | startswith(\"Claude Replied:\") | not)) |
+                map(select(.body | startswith(\"CodeMate Replied:\") | not)) |
                 map(select(.reactions.eyes == 0)) |
                 sort_by(.id)
             " 2>/dev/null)
@@ -485,7 +487,7 @@ main() {
             # Format comment details for the selected agent.
             comment_summary=$(echo "$comments_data" | jq -r '
                 map(
-                    "- \(.path):\(.line // .original_line) by @\(.user.login):\n  \(.body | split("\n") | join("\n  "))"
+                    "- comment_id: \(.id)\n  path: \(.path)\n  line: \(.line // .original_line)\n  author: @\(.user.login)\n  body:\n  \(.body | split("\n") | join("\n  "))"
                 ) | join("\n\n")
             ')
 
@@ -494,7 +496,8 @@ main() {
             else
                 fix_instruction="use the pr plugin's fix-comments skill"
             fi
-            local message="Please $fix_instruction to address the following PR review comments:
+            local message="Please $fix_instruction to address the following PR review comments for PR #$pr_number.
+Use the provided comment_id values when replying to review threads; avoid fetching PR comments again unless the supplied context is insufficient.
 
 $comment_summary"
             send_to_agent "$message"

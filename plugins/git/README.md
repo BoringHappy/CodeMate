@@ -1,6 +1,6 @@
 # Git Plugin
 
-A Claude Code plugin for Git workflow management.
+A Claude Code and Codex plugin for Git workflow management.
 
 ## Overview
 
@@ -30,10 +30,16 @@ Stages all changes, creates a commit with a meaningful message, and pushes to th
 
 This plugin is automatically installed in the CodeMate environment via the marketplace in the Dockerfile.
 
-For manual installation in other environments:
+For manual installation in Claude Code:
 ```bash
 claude plugin marketplace add /path/to/marketplace
 claude plugin install git@codemate --scope user
+```
+
+For manual installation in Codex:
+```bash
+codex plugin marketplace add /path/to/marketplace
+codex plugin add git@codemate
 ```
 
 ## Requirements
@@ -48,11 +54,9 @@ claude plugin install git@codemate --scope user
 git/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest
+├── .codex-plugin/
+│   └── plugin.json          # Plugin manifest
 └── skills/
     └── commit/
         └── SKILL.md
 ```
-
-## Version
-
-1.0.0

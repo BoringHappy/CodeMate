@@ -1,6 +1,6 @@
 # PR Plugin
 
-A Claude Code plugin for managing GitHub Pull Request workflows.
+A Claude Code and Codex plugin for managing GitHub Pull Request workflows.
 
 ## Overview
 
@@ -54,9 +54,16 @@ Updates the PR title and/or description based on the actual changes.
 
 This plugin is automatically loaded in the CodeMate environment via the `--plugin-dir` flag in the Dockerfile.
 
-For manual installation in other environments:
+For manual installation in Claude Code:
 ```bash
-claude --plugin-dir /path/to/pr
+claude plugin marketplace add /path/to/marketplace
+claude plugin install pr@codemate --scope user
+```
+
+For manual installation in Codex:
+```bash
+codex plugin marketplace add /path/to/marketplace
+codex plugin add pr@codemate
 ```
 
 ## Requirements
@@ -73,6 +80,8 @@ claude --plugin-dir /path/to/pr
 pr/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest
+├── .codex-plugin/
+│   └── plugin.json          # Plugin manifest
 └── skills/
     ├── get-details/
     │   └── SKILL.md
@@ -81,7 +90,3 @@ pr/
     └── update/
         └── SKILL.md
 ```
-
-## Version
-
-1.0.2

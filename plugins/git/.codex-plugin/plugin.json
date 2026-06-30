@@ -1,6 +1,6 @@
 {
   "name": "git",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Git workflow management tools for staging, committing, and pushing changes",
   "author": {
     "name": "CodeMate"
