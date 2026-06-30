@@ -247,6 +247,17 @@ def validate_config(config: Mapping[str, ResolvedValue]) -> None:
     if agent not in {"claude", "codex"}:
         raise SystemExit(f"Invalid CODEMATE_AGENT: {agent}. Expected: claude or codex")
 
+    targets = {
+        "--branch / CODEMATE_BRANCH_NAME": value(config, "CODEMATE_BRANCH_NAME"),
+        "--pr / CODEMATE_PR_NUMBER": value(config, "CODEMATE_PR_NUMBER"),
+        "--issue / CODEMATE_ISSUE_NUMBER": value(config, "CODEMATE_ISSUE_NUMBER"),
+    }
+    selected_targets = [label for label, target_value in targets.items() if target_value]
+    if not selected_targets:
+        raise SystemExit("Specify one of --branch, --pr, or --issue.")
+    if len(selected_targets) > 1:
+        raise SystemExit("Specify only one target: " + ", ".join(selected_targets))
+
     if not value(config, "CODEMATE_ALLOW_COUNTRY") and not value(config, "CODEMATE_ALLOW_IP"):
         raise SystemExit(
             "Neither CODEMATE_ALLOW_COUNTRY nor CODEMATE_ALLOW_IP is set. "
