@@ -231,6 +231,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_GITHUB_TOKEN` | Auto | GitHub personal access token (defaults to `gh auth token` if not provided) |
 | `CODEMATE_GIT_USER_NAME` | Auto | Git commit author name (defaults to `git config user.name` if not provided) |
 | `CODEMATE_GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
+| `CODEMATE_CO_AUTHOR_BY` | No | Commit co-author used by the Git commit skill, e.g. `Name <email@example.com>` or `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
 | `SLACK_WEBHOOK` | No | Slack Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
@@ -243,7 +244,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
-`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run.
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
 
 
 ## How It Works

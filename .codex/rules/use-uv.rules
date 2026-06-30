@@ -1,0 +1,33 @@
+# Allow uv-based Python development commands for this repository.
+
+prefix_rule(
+    pattern = ["uv"],
+    decision = "allow",
+    justification = "This repository uses uv for Python dependency and command execution workflows.",
+    match = [
+        "uv sync",
+        "uv run python -m compileall src",
+        "uv run codemate --help",
+        "uv add pytest",
+        "uv remove pytest",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pip", "install"],
+    decision = "prompt",
+    justification = "Use uv for dependency management in this repository unless pip is explicitly required.",
+    match = [
+        "pip install typer",
+    ],
+)
+
+prefix_rule(
+    pattern = ["python", "-m", "pip"],
+    decision = "prompt",
+    justification = "Use uv for dependency management in this repository unless pip is explicitly required.",
+    match = [
+        "python -m pip install typer",
+    ],
+)
+
