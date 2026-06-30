@@ -109,7 +109,7 @@ codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:la
 3. 提示你输入 Anthropic API token 和其他设置
 
 **配置结构：**
-- **全局配置**：`~/.codemate/` - 挂载到容器的共享 home 状态；其中每个顶层文件或目录都会用相同名称链接到 `$HOME`
+- **全局配置**：`~/.codemate/` - 共享 home 状态；其中每个顶层文件或目录都会用相同名称挂载到 `$HOME`
 - **项目配置**：每个项目目录中的 `.env` - 项目特定的密钥和设置
 
 **仓库 URL 解析**：脚本按以下优先级确定仓库 URL：

@@ -427,10 +427,17 @@ run_codemate() {
     # Create new container
     print_info "Creating new container $CONTAINER_NAME..."
 
-    # Build volume mounts using global config
+    # Build volume mounts using global config. Mount the parent for visibility,
+    # then mount each top-level entry into $HOME with its original basename.
     local volume_mounts=(
         -v "$config_dir:/home/agent/.codemate"
     )
+
+    while IFS= read -r -d '' config_entry; do
+        local entry_name
+        entry_name="$(basename "$config_entry")"
+        volume_mounts+=(-v "$config_entry:/home/agent/$entry_name")
+    done < <(find "$config_dir" -mindepth 1 -maxdepth 1 -print0 | sort -z)
 
     # Mount skills directory if it exists in current directory
     if [ -d "$current_dir/skills" ]; then

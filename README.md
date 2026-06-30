@@ -120,7 +120,7 @@ The setup command will:
 3. Prompt you for Anthropic API token and other settings
 
 **Configuration Structure:**
-- **Global config**: `~/.codemate/` - shared home state mounted into the container; each top-level file or directory is linked into `$HOME` with the same basename
+- **Global config**: `~/.codemate/` - shared home state; each top-level file or directory is mounted into `$HOME` with the same basename
 - **Project config**: `.env` in each project directory - Project-specific secrets and settings
 
 **Repository URL Resolution**: The script determines the repository URL in this priority order:
