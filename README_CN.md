@@ -56,6 +56,12 @@ uv tool install --upgrade git+https://github.com/BoringHappy/CodeMate.git
 uv tool upgrade codemate-cli
 ```
 
+卸载 CLI：
+
+```bash
+uv tool uninstall codemate-cli
+```
+
 如果你使用 `pipx`：
 
 ```bash

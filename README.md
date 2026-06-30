@@ -58,6 +58,12 @@ If CodeMate is already installed, you can also upgrade it by package name:
 uv tool upgrade codemate-cli
 ```
 
+Uninstall the CLI with:
+
+```bash
+uv tool uninstall codemate-cli
+```
+
 If you prefer `pipx`, install with:
 
 ```bash
