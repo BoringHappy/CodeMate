@@ -8,7 +8,7 @@ source "$SETUP_DIR/shell/common.sh"
 
 # Claude-specific setup belongs in the Claude runner.
 run_setup_script "$SETUP_DIR/python/setup-ccline.py" "Running setup-ccline.py..."
-run_setup_script "$SETUP_DIR/shell/setup-plugins.sh" "Running setup-plugins.sh..."
+run_setup_script "$SETUP_DIR/shell/setup-claude-plugins.sh" "Running setup-claude-plugins.sh..."
 
 # Configuration
 CLAUDE_SESSION="claude-code"

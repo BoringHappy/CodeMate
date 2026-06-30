@@ -51,7 +51,7 @@ At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set â
 
 ### Plugin Marketplace
 
-CodeMate uses the CodeMatePlugin marketplace to distribute plugins. Plugins are installed at runtime during container startup via `setup/shell/setup-plugins.sh` using the `claude plugin` CLI commands.
+CodeMate uses the CodeMatePlugin marketplace to distribute plugins. Claude plugins are installed at runtime during container startup via `setup/shell/setup-claude-plugins.sh` using the `claude plugin` CLI commands.
 
 The marketplace is fetched from the external repository: `BoringHappy/CodeMatePlugin`
 
@@ -130,4 +130,4 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 - No test suite exists - this is infrastructure/tooling
 - GitHub Actions workflow (`docker-build.yml`) builds and pushes the combined image to GHCR on main branch and tags
 - GitHub Actions workflow (`docker-build-schedule.yml`) triggers a rebuild every day at 05:00 UTC
-- Multi-platform builds: linux/amd64 and linux/arm64
+- Docker image builds: linux/amd64
