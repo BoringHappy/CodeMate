@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import os
 import shlex
 import shutil
@@ -10,7 +9,10 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+
+import click
 
 
 DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
@@ -169,7 +171,7 @@ def first_value(
     return ResolvedValue(field.default, "default", field)
 
 
-def collect_cli_values(args: argparse.Namespace) -> Dict[str, str]:
+def collect_cli_values(args: SimpleNamespace) -> Dict[str, str]:
     values: Dict[str, str] = {}
     for field in FIELDS:
         if not field.cli_attr:
@@ -189,18 +191,34 @@ def collect_cli_values(args: argparse.Namespace) -> Dict[str, str]:
     return values
 
 
-def resolve_config(args: argparse.Namespace, cwd: Path) -> Dict[str, ResolvedValue]:
+def resolve_config(args: SimpleNamespace, cwd: Path) -> Dict[str, ResolvedValue]:
     project_env = parse_env_file(cwd / ".env")
     cli_values = collect_cli_values(args)
+    target_keys = ("CODEMATE_BRANCH_NAME", "CODEMATE_PR_NUMBER", "CODEMATE_ISSUE_NUMBER")
+    cli_target = next((key for key in target_keys if FIELD_BY_NAME[key].cli_attr in cli_values), None)
+    if cli_target:
+        for key in target_keys:
+            if key != cli_target:
+                project_env.pop(key, None)
+
     resolved = {
         field.name: first_value(field, cli_values, project_env, os.environ)
         for field in FIELDS
     }
 
+    if cli_target:
+        for key in target_keys:
+            if key != cli_target:
+                resolved[key] = ResolvedValue("", "target-reset", FIELD_BY_NAME[key])
+
     # Preserve additional project .env keys so existing provider/tool credentials still reach the container.
     for key, value in project_env.items():
         if key not in resolved:
             resolved[key] = ResolvedValue(value, ".env", None)
+
+    for env_file in args.env_file or []:
+        for key, value in parse_env_file(Path(env_file)).items():
+            resolved[key] = ResolvedValue(value, f"env-file:{env_file}", FIELD_BY_NAME.get(key))
 
     # Explicit --env values have the highest priority for extra container variables.
     for item in args.env or []:
@@ -208,10 +226,6 @@ def resolve_config(args: argparse.Namespace, cwd: Path) -> Dict[str, ResolvedVal
             raise SystemExit(f"--env expects KEY=VALUE, got: {item}")
         key, value = item.split("=", 1)
         resolved[key] = ResolvedValue(value, "cli", None)
-
-    for env_file in args.env_file or []:
-        for key, value in parse_env_file(Path(env_file)).items():
-            resolved[key] = ResolvedValue(value, f"env-file:{env_file}", FIELD_BY_NAME.get(key))
 
     return resolved
 
@@ -352,7 +366,7 @@ def issue_defaults(config: Dict[str, ResolvedValue]) -> None:
         config["CODEMATE_QUERY"] = ResolvedValue(query, "derived", FIELD_BY_NAME["CODEMATE_QUERY"])
 
 
-def docker_command(config: Mapping[str, ResolvedValue], args: argparse.Namespace, env_path: str) -> List[str]:
+def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, env_path: str) -> List[str]:
     repo = repo_name(value(config, "CODEMATE_GIT_REPO_URL"))
     identity = value(config, "CODEMATE_BRANCH_NAME") or (
         f"pr-{value(config, 'CODEMATE_PR_NUMBER')}" if value(config, "CODEMATE_PR_NUMBER") else "main"
@@ -406,7 +420,7 @@ def print_config(config: Mapping[str, ResolvedValue]) -> None:
         print(f"{key}={redact(item)} ({item.source})")
 
 
-def run_codemate(args: argparse.Namespace) -> None:
+def run_codemate(args: SimpleNamespace) -> None:
     cwd = Path.cwd()
     if args.setup:
         create_setup_files(cwd)
@@ -447,47 +461,84 @@ def run_codemate(args: argparse.Namespace) -> None:
             pass
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="CodeMate Docker launcher")
-    parser.add_argument("--setup", action="store_true", help="create configuration files")
-    parser.add_argument("--update", action="store_true", help="show update instructions")
-    parser.add_argument("--branch", help="branch name to work on")
-    parser.add_argument("--pr", help="existing PR number to work on")
-    parser.add_argument("--pr-title", dest="pr_title", help="PR title")
-    parser.add_argument("--issue", help="GitHub issue number to work on")
-    parser.add_argument("--query", help="initial query to send to the selected agent")
-    parser.add_argument("--agent", choices=["claude", "codex"], help="runtime agent")
-    parser.add_argument("--no-pr", action="store_true", help="skip PR creation and branch push")
-    parser.add_argument("--docker-param", action="append", default=[], help="extra Docker run parameter")
-    parser.add_argument("--repo", help="git repository URL")
-    parser.add_argument("--upstream", help="upstream repository URL")
-    parser.add_argument("--mount", action="append", default=[], help="custom volume mount")
-    parser.add_argument("--image", help=f"Docker image to use (default: {DEFAULT_IMAGE})")
-    parser.add_argument("--build", action="store_true", help="build Docker image from local Dockerfile")
-    parser.add_argument("-f", "--dockerfile", default="docker/Dockerfile", help="path to Dockerfile")
-    parser.add_argument("--tag", help="image tag for local build")
-    parser.add_argument("--env", action="append", default=[], help="extra container env KEY=VALUE")
-    parser.add_argument("--env-file", action="append", default=[], help="additional env file to merge")
-    parser.add_argument("--config", action="store_true", help="print resolved config with sources")
-    parser.add_argument("--dry-run", action="store_true", help="print Docker command without running it")
-    return parser
-
-
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--setup", is_flag=True, help="Create configuration files.")
+@click.option("--update", is_flag=True, help="Show update instructions.")
+@click.option("--branch", help="Branch name to work on.")
+@click.option("--pr", help="Existing PR number to work on.")
+@click.option("--pr-title", help="PR title.")
+@click.option("--issue", help="GitHub issue number to work on.")
+@click.option("--query", help="Initial query to send to the selected agent.")
+@click.option("--agent", type=click.Choice(["claude", "codex"]), help="Runtime agent.")
+@click.option("--no-pr", is_flag=True, help="Skip PR creation and branch push.")
+@click.option("--docker-param", multiple=True, help="Extra Docker run parameter.")
+@click.option("--repo", help="Git repository URL.")
+@click.option("--upstream", help="Upstream repository URL.")
+@click.option("--mount", multiple=True, help="Custom volume mount.")
+@click.option("--image", help=f"Docker image to use. Default: {DEFAULT_IMAGE}")
+@click.option("--build", "build_image_flag", is_flag=True, help="Build Docker image from local Dockerfile.")
+@click.option("-f", "--dockerfile", default="docker/Dockerfile", show_default=True, help="Path to Dockerfile.")
+@click.option("--tag", help="Image tag for local build.")
+@click.option("--env", "env_values", multiple=True, help="Extra container env KEY=VALUE.")
+@click.option("--env-file", "env_files", multiple=True, help="Additional env file to merge.")
+@click.option("--config", "show_config", is_flag=True, help="Print resolved config with sources.")
+@click.option("--dry-run", is_flag=True, help="Print Docker command without running it.")
+def cli(
+    setup: bool,
+    update: bool,
+    branch: Optional[str],
+    pr: Optional[str],
+    pr_title: Optional[str],
+    issue: Optional[str],
+    query: Optional[str],
+    agent: Optional[str],
+    no_pr: bool,
+    docker_param: Tuple[str, ...],
+    repo: Optional[str],
+    upstream: Optional[str],
+    mount: Tuple[str, ...],
+    image: Optional[str],
+    build_image_flag: bool,
+    dockerfile: str,
+    tag: Optional[str],
+    env_values: Tuple[str, ...],
+    env_files: Tuple[str, ...],
+    show_config: bool,
+    dry_run: bool,
+) -> None:
+    args = SimpleNamespace(
+        setup=setup,
+        update=update,
+        branch=branch,
+        pr=pr,
+        pr_title=pr_title,
+        issue=issue,
+        query=query,
+        agent=agent,
+        no_pr=no_pr,
+        docker_param=list(docker_param),
+        repo=repo,
+        upstream=upstream,
+        mount=list(mount),
+        image=image,
+        build=build_image_flag,
+        dockerfile=dockerfile,
+        tag=tag,
+        env=list(env_values),
+        env_file=list(env_files),
+        config=show_config,
+        dry_run=dry_run,
+    )
     try:
         run_codemate(args)
     except subprocess.CalledProcessError as exc:
-        print_error(f"Command failed with exit code {exc.returncode}: {' '.join(exc.cmd)}")
-        return exc.returncode
+        raise click.ClickException(f"Command failed with exit code {exc.returncode}: {' '.join(exc.cmd)}") from exc
     except SystemExit as exc:
         if isinstance(exc.code, str):
-            print_error(exc.code)
-            return 1
-        return int(exc.code or 0)
-    return 0
+            raise click.ClickException(exc.code) from exc
+        if exc.code:
+            raise
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    cli()

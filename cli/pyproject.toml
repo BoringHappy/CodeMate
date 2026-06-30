@@ -3,10 +3,12 @@ name = "codemate-cli"
 version = "0.1.0"
 description = "CodeMate Docker launcher"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+  "click>=8.1",
+]
 
 [project.scripts]
-codemate = "codemate_cli.main:main"
+codemate = "codemate_cli.main:cli"
 
 [build-system]
 requires = ["hatchling"]
