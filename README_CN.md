@@ -43,21 +43,23 @@ CodeMate 通过在隔离的 Docker 容器中运行 Claude Code 来解决这个�
 
 #### 全局安装（推荐）
 
-全局安装 `codemate` 以便在任何地方使用：
+使用 `uv` 全局安装 Python CLI：
 
 ```bash
-# 直接安装到 /usr/local/bin（需要 sudo）
-sudo curl -fsSL https://raw.githubusercontent.com/BoringHappy/CodeMate/main/codemate -o /usr/local/bin/codemate && sudo chmod +x /usr/local/bin/codemate
+# 推荐方式
+uv tool install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 
-# 或不使用 sudo 安装到 ~/bin（确保 ~/bin 在你的 PATH 中）
-mkdir -p ~/bin && curl -fsSL https://raw.githubusercontent.com/BoringHappy/CodeMate/main/codemate -o ~/bin/codemate && chmod +x ~/bin/codemate
+# 如果你使用 pipx
+pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 
 # 一次性全局设置
 codemate --setup
 
 # 更新到最新版本
-codemate --update
+uv tool upgrade codemate-cli
 ```
+
+仓库根目录下的旧 shell launcher 仍保留用于兼容；新的 CLI 实现在 `cli/` 中。
 
 ### 使用方法
 

@@ -12,66 +12,17 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Supported environment variables resolved with this priority:
-# CLI option > project .env > ambient environment > command-derived/default.
-CODEMATE_ENV_KEYS=(
-    CODEMATE_GIT_REPO_URL
-    CODEMATE_UPSTREAM_REPO_URL
-    CODEMATE_BRANCH_NAME
-    CODEMATE_PR_NUMBER
-    CODEMATE_PR_TITLE
-    CODEMATE_ISSUE_NUMBER
-    CODEMATE_QUERY
-    CODEMATE_NO_PR
-    CODEMATE_AGENT
-    CODEMATE_GITHUB_TOKEN
-    CODEMATE_GIT_USER_NAME
-    CODEMATE_GIT_USER_EMAIL
-    CODEMATE_ALLOW_COUNTRY
-    CODEMATE_ALLOW_IP
-    CODEMATE_DOCKER_PARAMS
-    CODEMATE_MOUNTS
-    CODEMATE_DEFAULT_MARKETPLACES
-    CODEMATE_DEFAULT_PLUGINS
-    CODEMATE_CUSTOM_MARKETPLACES
-    CODEMATE_CUSTOM_PLUGINS
-    CODEMATE_SOFT_LINKS
-    CODEMATE_REPO_DIR
-    CODEMATE_AGENT_SESSION
-    CODEMATE_PR_MONITOR_STATE_FILE
-    SLACK_WEBHOOK
-    LARK_WEBHOOK
-    ANTHROPIC_AUTH_TOKEN
-    ANTHROPIC_BASE_URL
-)
-
-# CLI-only launcher settings.
-CLI_CODEMATE_GIT_REPO_URL=""
-CLI_CODEMATE_UPSTREAM_REPO_URL=""
-CLI_CODEMATE_BRANCH_NAME=""
-CLI_CODEMATE_PR_NUMBER=""
-CLI_CODEMATE_PR_TITLE=""
-CLI_CODEMATE_ISSUE_NUMBER=""
-CLI_CODEMATE_QUERY=""
-CLI_CODEMATE_NO_PR=""
-CLI_CODEMATE_AGENT=""
-CLI_CODEMATE_IMAGE=""
-for _key in "${CODEMATE_ENV_KEYS[@]}" CODEMATE_IMAGE; do
-    if [ "${!_key+x}" ]; then
-        printf -v "GLOBAL_HAS_${_key}" '%s' "1"
-        printf -v "GLOBAL_${_key}" '%s' "${!_key}"
-    else
-        printf -v "GLOBAL_HAS_${_key}" '%s' "0"
-        printf -v "GLOBAL_${_key}" '%s' ""
-    fi
-    printf -v "PROJECT_HAS_${_key}" '%s' "0"
-    printf -v "PROJECT_${_key}" '%s' ""
-    printf -v "CLI_HAS_${_key}" '%s' "0"
-done
-unset _key
-
+# Default values
+CODEMATE_GIT_REPO_URL="${CODEMATE_GIT_REPO_URL:-$(git config --get remote.origin.url 2>/dev/null || echo '')}"
+CODEMATE_UPSTREAM_REPO_URL="${CODEMATE_UPSTREAM_REPO_URL:-}"
+CODEMATE_BRANCH_NAME=""
+CODEMATE_PR_NUMBER=""
+CODEMATE_PR_TITLE=""
+CODEMATE_ISSUE_NUMBER=""
+CODEMATE_QUERY=""
+CODEMATE_NO_PR=""
 DOCKER_EXTRA_PARAMS=()
-CODEMATE_IMAGE=""
+CODEMATE_IMAGE="${CODEMATE_IMAGE:-ghcr.io/boringhappy/codemate:latest}"
 BUILD_LOCAL=false
 DOCKERFILE_PATH="docker/Dockerfile"
 IMAGE_TAG=""
@@ -91,154 +42,6 @@ print_warning() {
 
 print_error() {
     printf "${RED}✗${NC} %s\n" "$1"
-}
-
-resolve_value() {
-    local name="$1"
-    local command_value="${2:-}"
-    local default_value="${3:-}"
-    local has_var
-    local value_var
-
-    has_var="CLI_HAS_${name}"
-    value_var="CLI_${name}"
-    if [ "${!has_var:-0}" = "1" ] && [ -n "${!value_var}" ]; then
-        printf '%s' "${!value_var}"
-        return
-    fi
-
-    has_var="PROJECT_HAS_${name}"
-    value_var="PROJECT_${name}"
-    if [ "${!has_var:-0}" = "1" ] && [ -n "${!value_var}" ]; then
-        printf '%s' "${!value_var}"
-        return
-    fi
-
-    has_var="GLOBAL_HAS_${name}"
-    value_var="GLOBAL_${name}"
-    if [ "${!has_var:-0}" = "1" ] && [ -n "${!value_var}" ]; then
-        printf '%s' "${!value_var}"
-        return
-    fi
-
-    if [ -n "$command_value" ]; then
-        printf '%s' "$command_value"
-    else
-        printf '%s' "$default_value"
-    fi
-}
-
-resolve_explicit_value() {
-    local name="$1"
-    local default_value="${2:-}"
-    local has_var
-    local value_var
-
-    has_var="CLI_HAS_${name}"
-    value_var="CLI_${name}"
-    if [ "${!has_var:-0}" = "1" ]; then
-        printf '%s' "${!value_var}"
-        return
-    fi
-
-    has_var="PROJECT_HAS_${name}"
-    value_var="PROJECT_${name}"
-    if [ "${!has_var:-0}" = "1" ]; then
-        printf '%s' "${!value_var}"
-        return
-    fi
-
-    has_var="GLOBAL_HAS_${name}"
-    value_var="GLOBAL_${name}"
-    if [ "${!has_var:-0}" = "1" ]; then
-        printf '%s' "${!value_var}"
-        return
-    fi
-
-    printf '%s' "$default_value"
-}
-
-load_project_env() {
-    local env_file="$1"
-    local key
-
-    for key in "${CODEMATE_ENV_KEYS[@]}" CODEMATE_IMAGE; do
-        unset "$key"
-    done
-
-    if [ -f "$env_file" ]; then
-        set -a
-        source "$env_file"
-        set +a
-    fi
-
-    for key in "${CODEMATE_ENV_KEYS[@]}" CODEMATE_IMAGE; do
-        if [ "${!key+x}" ]; then
-            printf -v "PROJECT_HAS_${key}" '%s' "1"
-            printf -v "PROJECT_${key}" '%s' "${!key}"
-        else
-            printf -v "PROJECT_HAS_${key}" '%s' "0"
-            printf -v "PROJECT_${key}" '%s' ""
-        fi
-    done
-}
-
-resolve_codemate_config() {
-    local current_dir="$1"
-    local env_file="$current_dir/.env"
-    local remote_url=""
-    local github_token=""
-    local git_user_name=""
-    local git_user_email=""
-
-    if [ -f "$env_file" ]; then
-        load_project_env "$env_file"
-    else
-        print_warning "No .env file found in current directory"
-        echo "Create one with: codemate --setup"
-        load_project_env "/dev/null"
-    fi
-
-    remote_url="$(git config --get remote.origin.url 2>/dev/null || echo '')"
-    github_token="$(gh auth token 2>/dev/null || echo '')"
-    git_user_name="$(git config user.name 2>/dev/null || echo '')"
-    git_user_email="$(git config user.email 2>/dev/null || echo '')"
-
-    CODEMATE_GIT_REPO_URL="$(resolve_value CODEMATE_GIT_REPO_URL "$remote_url")"
-    CODEMATE_UPSTREAM_REPO_URL="$(resolve_value CODEMATE_UPSTREAM_REPO_URL)"
-    CODEMATE_BRANCH_NAME="$(resolve_value CODEMATE_BRANCH_NAME)"
-    CODEMATE_PR_NUMBER="$(resolve_value CODEMATE_PR_NUMBER)"
-    CODEMATE_PR_TITLE="$(resolve_value CODEMATE_PR_TITLE)"
-    CODEMATE_ISSUE_NUMBER="$(resolve_value CODEMATE_ISSUE_NUMBER)"
-    CODEMATE_QUERY="$(resolve_value CODEMATE_QUERY)"
-    CODEMATE_NO_PR="$(resolve_value CODEMATE_NO_PR)"
-    CODEMATE_AGENT="$(resolve_value CODEMATE_AGENT "" "claude")"
-    CODEMATE_GITHUB_TOKEN="$(resolve_value CODEMATE_GITHUB_TOKEN "$github_token")"
-    CODEMATE_GIT_USER_NAME="$(resolve_value CODEMATE_GIT_USER_NAME "$git_user_name")"
-    CODEMATE_GIT_USER_EMAIL="$(resolve_value CODEMATE_GIT_USER_EMAIL "$git_user_email")"
-    CODEMATE_ALLOW_COUNTRY="$(resolve_value CODEMATE_ALLOW_COUNTRY)"
-    CODEMATE_ALLOW_IP="$(resolve_value CODEMATE_ALLOW_IP)"
-    CODEMATE_DOCKER_PARAMS="$(resolve_value CODEMATE_DOCKER_PARAMS)"
-    CODEMATE_MOUNTS="$(resolve_value CODEMATE_MOUNTS)"
-    CODEMATE_DEFAULT_MARKETPLACES="$(resolve_explicit_value CODEMATE_DEFAULT_MARKETPLACES "BoringHappy/CodeMate")"
-    CODEMATE_DEFAULT_PLUGINS="$(resolve_explicit_value CODEMATE_DEFAULT_PLUGINS "git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate")"
-    CODEMATE_CUSTOM_MARKETPLACES="$(resolve_value CODEMATE_CUSTOM_MARKETPLACES)"
-    CODEMATE_CUSTOM_PLUGINS="$(resolve_value CODEMATE_CUSTOM_PLUGINS)"
-    CODEMATE_SOFT_LINKS="$(resolve_value CODEMATE_SOFT_LINKS)"
-    CODEMATE_REPO_DIR="$(resolve_value CODEMATE_REPO_DIR)"
-    CODEMATE_AGENT_SESSION="$(resolve_value CODEMATE_AGENT_SESSION)"
-    CODEMATE_PR_MONITOR_STATE_FILE="$(resolve_value CODEMATE_PR_MONITOR_STATE_FILE)"
-    SLACK_WEBHOOK="$(resolve_value SLACK_WEBHOOK)"
-    LARK_WEBHOOK="$(resolve_value LARK_WEBHOOK)"
-    ANTHROPIC_AUTH_TOKEN="$(resolve_value ANTHROPIC_AUTH_TOKEN)"
-    ANTHROPIC_BASE_URL="$(resolve_value ANTHROPIC_BASE_URL)"
-    CODEMATE_IMAGE="$(resolve_value CODEMATE_IMAGE "" "ghcr.io/boringhappy/codemate:latest")"
-}
-
-add_env_arg() {
-    local name="$1"
-    local value_var="$1"
-    DOCKER_ENV_ARGS+=(-e "$name=${!value_var}")
 }
 
 # Function to ask yes/no question
@@ -282,15 +85,12 @@ create_env_file() {
 # Optional: Default repository URL
 # CODEMATE_GIT_REPO_URL=
 
-# Runtime agent: claude (default) or codex
-# CODEMATE_AGENT=claude
-
 # Anthropic API Configuration
 $(if [ -n "$anthropic_token" ]; then echo "ANTHROPIC_AUTH_TOKEN=$anthropic_token"; else echo "# ANTHROPIC_AUTH_TOKEN="; fi)
 $(if [ -n "$anthropic_url" ]; then echo "ANTHROPIC_BASE_URL=$anthropic_url"; else echo "# ANTHROPIC_BASE_URL="; fi)
 
 # Access control: the container queries http://ip-api.com/json/ before starting
-# the selected agent and exits unless its IP or country is allowlisted. Set at least one of
+# Claude and exits unless its IP or country is allowlisted. Set at least one of
 # the two variables below; the check passes if EITHER matches.
 #
 #   CODEMATE_ALLOW_COUNTRY - comma-separated ip-api.com 'countryCode' values.
@@ -533,17 +333,29 @@ run_codemate() {
 
     print_info "Using global configuration from: $config_dir"
 
-    if [ -n "${CODEMATE_AGENT:-}" ]; then
-        case "$CODEMATE_AGENT" in
-            claude|codex)
-                ;;
-            *)
-                print_error "Invalid CODEMATE_AGENT: $CODEMATE_AGENT"
-                echo "Expected: claude or codex"
-                exit 1
-                ;;
-        esac
+    local launcher_branch_name="$CODEMATE_BRANCH_NAME"
+    local launcher_pr_number="$CODEMATE_PR_NUMBER"
+    local launcher_pr_title="$CODEMATE_PR_TITLE"
+    local launcher_issue_number="$CODEMATE_ISSUE_NUMBER"
+    local launcher_query="$CODEMATE_QUERY"
+    local launcher_no_pr="$CODEMATE_NO_PR"
+
+    # Source .env file from current directory (project-specific)
+    if [ -f "$current_dir/.env" ]; then
+        set -a
+        source "$current_dir/.env"
+        set +a
+    else
+        print_warning "No .env file found in current directory"
+        echo "Create one with: codemate --setup"
     fi
+
+    CODEMATE_BRANCH_NAME="$launcher_branch_name"
+    CODEMATE_PR_NUMBER="$launcher_pr_number"
+    CODEMATE_PR_TITLE="$launcher_pr_title"
+    CODEMATE_ISSUE_NUMBER="$launcher_issue_number"
+    CODEMATE_QUERY="$launcher_query"
+    CODEMATE_NO_PR="$launcher_no_pr"
 
     # Require at least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP so the
     # container can enforce its access check (it passes if either one matches).
@@ -589,11 +401,9 @@ run_codemate() {
     local branch_sanitized=$(echo "$branch_for_name" | sed 's/[^a-zA-Z0-9_-]/-/g')
     CONTAINER_NAME="codemate-${repo_for_name}-${branch_sanitized}"
 
-    # Build extra docker params. CLI --docker-param overrides CODEMATE_DOCKER_PARAMS.
-    local docker_run_extra=()
-    if [ ${#DOCKER_EXTRA_PARAMS[@]} -gt 0 ]; then
-        docker_run_extra=("${DOCKER_EXTRA_PARAMS[@]}")
-    elif [ -n "${CODEMATE_DOCKER_PARAMS:-}" ]; then
+    # Build extra docker params from CLI flags and CODEMATE_DOCKER_PARAMS env var
+    local docker_run_extra=("${DOCKER_EXTRA_PARAMS[@]}")
+    if [ -n "${CODEMATE_DOCKER_PARAMS:-}" ]; then
         read -ra _env_params <<< "$CODEMATE_DOCKER_PARAMS"
         docker_run_extra+=("${_env_params[@]}")
     fi
@@ -601,8 +411,8 @@ run_codemate() {
         print_info "Adding docker params: ${docker_run_extra[*]}"
     fi
 
-    # Build mounts. CLI --mount overrides CODEMATE_MOUNTS.
-    if [ ${#custom_mounts[@]} -eq 0 ] && [ -n "${CODEMATE_MOUNTS:-}" ]; then
+    # Extend custom_mounts with CODEMATE_MOUNTS env var (space-separated PATH:PATH specs)
+    if [ -n "${CODEMATE_MOUNTS:-}" ]; then
         read -ra _env_mounts <<< "$CODEMATE_MOUNTS"
         custom_mounts+=("${_env_mounts[@]}")
     fi
@@ -630,7 +440,6 @@ run_codemate() {
 
     # Create new container
     print_info "Creating new container $CONTAINER_NAME..."
-    print_info "Using agent: $CODEMATE_AGENT"
 
     # Build volume mounts using global config. Mount the parent for visibility,
     # then mount each top-level entry into $HOME with its original basename.
@@ -661,12 +470,11 @@ run_codemate() {
         fi
     done
 
-    local DOCKER_ENV_ARGS=()
-    local env_key
-    for env_key in "${CODEMATE_ENV_KEYS[@]}"; do
-        add_env_arg "$env_key"
-    done
-    DOCKER_ENV_ARGS+=(-e "TMPDIR=/home/agent/.claude/tmp")
+    # Build env file flag if .env exists in current directory
+    local env_file_flag=""
+    if [ -f "$current_dir/.env" ]; then
+        env_file_flag="--env-file $current_dir/.env"
+    fi
 
     # Build docker run command
     local docker_cmd=(
@@ -676,7 +484,21 @@ run_codemate() {
         "${docker_run_extra[@]}"
         -it
         "${volume_mounts[@]}"
-        "${DOCKER_ENV_ARGS[@]}"
+        $env_file_flag
+        -e "CODEMATE_GIT_REPO_URL=$CODEMATE_GIT_REPO_URL"
+        -e "CODEMATE_UPSTREAM_REPO_URL=$CODEMATE_UPSTREAM_REPO_URL"
+        -e "CODEMATE_BRANCH_NAME=$CODEMATE_BRANCH_NAME"
+        -e "CODEMATE_PR_NUMBER=$CODEMATE_PR_NUMBER"
+        -e "CODEMATE_PR_TITLE=$CODEMATE_PR_TITLE"
+        -e "CODEMATE_ISSUE_NUMBER=$CODEMATE_ISSUE_NUMBER"
+        -e "CODEMATE_QUERY=$CODEMATE_QUERY"
+        -e "CODEMATE_NO_PR=$CODEMATE_NO_PR"
+        -e "CODEMATE_GITHUB_TOKEN=$CODEMATE_GITHUB_TOKEN"
+        -e "CODEMATE_ALLOW_COUNTRY=$CODEMATE_ALLOW_COUNTRY"
+        -e "CODEMATE_ALLOW_IP=$CODEMATE_ALLOW_IP"
+        -e "CODEMATE_GIT_USER_NAME=$CODEMATE_GIT_USER_NAME"
+        -e "CODEMATE_GIT_USER_EMAIL=$CODEMATE_GIT_USER_EMAIL"
+        -e "TMPDIR=/home/agent/.claude/tmp"
         -w "/home/agent/$REPO_NAME"
         "$CODEMATE_IMAGE"
     )
@@ -688,7 +510,7 @@ run_codemate() {
 # Function to show usage
 show_usage() {
     cat << EOF
-CodeMate - Docker-based Claude Code and Codex environment
+CodeMate - Docker-based Claude Code environment
 
 Usage: codemate [OPTIONS]
 
@@ -699,8 +521,7 @@ Options:
   --pr NUMBER          Existing PR number to work on
   --pr-title TITLE     PR title (optional)
   --issue NUMBER       GitHub issue number to work on (creates branch issue-NUMBER)
-  --query TEXT         Initial query to send to the selected agent after startup
-  --agent AGENT        Runtime agent to launch: claude or codex (overrides CODEMATE_AGENT in .env)
+  --query TEXT         Initial query to send to Claude after startup
   --no-pr              Skip PR creation and branch push for new branches
   --docker-param PARAM Extra Docker run parameter, can be used multiple times
                        e.g. --docker-param "--network bridge" --docker-param "--memory 2g"
@@ -716,19 +537,15 @@ Options:
   --help               Show this help message
 
 Environment Variables:
-  Resolution order: command-line option > project .env > ambient environment > command/default.
-  Docker receives generated environment values from that resolved configuration.
-
   CODEMATE_GIT_REPO_URL         Repository URL (defaults to current repo's remote)
   CODEMATE_UPSTREAM_REPO_URL    Upstream repository URL (for fork workflows)
   CODEMATE_GITHUB_TOKEN         GitHub personal access token
   CODEMATE_GIT_USER_NAME        Git commit author name
   CODEMATE_GIT_USER_EMAIL       Git commit author email
-  CODEMATE_AGENT       Runtime agent to launch: claude (default) or codex
   CODEMATE_IMAGE       Docker image to use (default: ghcr.io/boringhappy/codemate:latest)
   CODEMATE_ALLOW_COUNTRY  Comma-separated list of ip-api.com 'countryCode' values the container is
                        allowed to run in (e.g. US,CA,GB). The container queries http://ip-api.com/json/
-                       before starting the agent; if neither the IP nor country is allowlisted it files a
+                       before starting Claude; if neither the IP nor country is allowlisted it files a
                        GitHub issue and exits. At least one of CODEMATE_ALLOW_COUNTRY / CODEMATE_ALLOW_IP
                        is required.
   CODEMATE_ALLOW_IP    Comma-separated list of exact IPs or IPv4 CIDR ranges the container is allowed
@@ -737,14 +554,6 @@ Environment Variables:
   CODEMATE_DOCKER_PARAMS        Space-separated extra Docker run parameters (e.g. "--network bridge --memory 2g")
   CODEMATE_MOUNTS      Space-separated extra volume mounts (e.g. "$HOME/.aws:/home/agent/.aws")
   SLACK_WEBHOOK        Slack Incoming Webhook URL for notifications when Claude stops
-  LARK_WEBHOOK         Lark Incoming Webhook URL for notifications when Claude stops
-  ANTHROPIC_AUTH_TOKEN Anthropic API token for custom API endpoints
-  ANTHROPIC_BASE_URL   Anthropic API base URL for custom API endpoints
-  CODEMATE_DEFAULT_MARKETPLACES Default plugin marketplaces (default: BoringHappy/CodeMate)
-  CODEMATE_DEFAULT_PLUGINS      Default plugins
-  CODEMATE_CUSTOM_MARKETPLACES  Additional plugin marketplace repositories
-  CODEMATE_CUSTOM_PLUGINS       Additional plugins to install
-  CODEMATE_SOFT_LINKS           Comma-separated source:destination pairs to symlink after repo setup
 
 Examples:
   # First time setup
@@ -758,9 +567,6 @@ Examples:
 
   # Run with branch name
   codemate --branch feature/my-feature
-
-  # Run with Codex instead of the default Claude runtime
-  codemate --branch feature/my-feature --agent codex
 
   # Run with existing PR
   codemate --pr 123
@@ -822,8 +628,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_BRANCH_NAME="$2"
-                CLI_HAS_CODEMATE_BRANCH_NAME=1
+                CODEMATE_BRANCH_NAME="$2"
                 shift 2
                 ;;
             --pr)
@@ -832,8 +637,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_PR_NUMBER="$2"
-                CLI_HAS_CODEMATE_PR_NUMBER=1
+                CODEMATE_PR_NUMBER="$2"
                 shift 2
                 ;;
             --pr-title)
@@ -842,8 +646,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_PR_TITLE="$2"
-                CLI_HAS_CODEMATE_PR_TITLE=1
+                CODEMATE_PR_TITLE="$2"
                 shift 2
                 ;;
             --issue)
@@ -852,8 +655,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_ISSUE_NUMBER="$2"
-                CLI_HAS_CODEMATE_ISSUE_NUMBER=1
+                CODEMATE_ISSUE_NUMBER="$2"
                 shift 2
                 ;;
             --query)
@@ -862,32 +664,11 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_QUERY="$2"
-                CLI_HAS_CODEMATE_QUERY=1
-                shift 2
-                ;;
-            --agent)
-                if [ -z "$2" ]; then
-                    print_error "--agent requires a value: claude or codex"
-                    show_usage
-                    exit 1
-                fi
-                case "$2" in
-                    claude|codex)
-                        CLI_CODEMATE_AGENT="$2"
-                        CLI_HAS_CODEMATE_AGENT=1
-                        ;;
-                    *)
-                        print_error "Invalid --agent value: $2"
-                        echo "Expected: claude or codex"
-                        exit 1
-                        ;;
-                esac
+                CODEMATE_QUERY="$2"
                 shift 2
                 ;;
             --no-pr)
-                CLI_CODEMATE_NO_PR="true"
-                CLI_HAS_CODEMATE_NO_PR=1
+                CODEMATE_NO_PR="true"
                 shift
                 ;;
             --docker-param)
@@ -906,8 +687,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_GIT_REPO_URL="$2"
-                CLI_HAS_CODEMATE_GIT_REPO_URL=1
+                CODEMATE_GIT_REPO_URL="$2"
                 shift 2
                 ;;
             --upstream)
@@ -916,8 +696,7 @@ main() {
                     show_usage
                     exit 1
                 fi
-                CLI_CODEMATE_UPSTREAM_REPO_URL="$2"
-                CLI_HAS_CODEMATE_UPSTREAM_REPO_URL=1
+                CODEMATE_UPSTREAM_REPO_URL="$2"
                 shift 2
                 ;;
             --mount)
@@ -925,8 +704,7 @@ main() {
                 shift 2
                 ;;
             --image)
-                CLI_CODEMATE_IMAGE="$2"
-                CLI_HAS_CODEMATE_IMAGE=1
+                CODEMATE_IMAGE="$2"
                 shift 2
                 ;;
             --build)
@@ -986,9 +764,6 @@ main() {
             exit 0
         fi
     fi
-
-    # Resolve all launcher/container configuration before validation.
-    resolve_codemate_config "$current_dir"
 
     # Check prerequisites
     check_prerequisites

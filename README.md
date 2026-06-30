@@ -45,21 +45,23 @@ On macOS, you need a Docker runtime since Docker doesn't run natively. Choose on
 
 #### Global Installation (Recommended)
 
-Install `codemate` globally to use it from anywhere:
+Install the Python CLI globally with `uv`:
 
 ```bash
-# Install directly to /usr/local/bin (requires sudo)
-sudo curl -fsSL https://raw.githubusercontent.com/BoringHappy/CodeMate/main/codemate -o /usr/local/bin/codemate && sudo chmod +x /usr/local/bin/codemate
+# Recommended
+uv tool install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 
-# Or install to ~/.local/bin without sudo (ensure ~/.local/bin is in your PATH)
-curl -fsSL https://raw.githubusercontent.com/BoringHappy/CodeMate/main/codemate -o ~/.local/bin/codemate && chmod +x ~/.local/bin/codemate
+# Alternative if you use pipx
+pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
 
 # One-time global setup
 codemate --setup
 
 # Update to latest version
-codemate --update
+uv tool upgrade codemate-cli
 ```
+
+The legacy shell launcher remains at the repository root for compatibility; new CLI work lives in `cli/`.
 
 ### Usage
 
