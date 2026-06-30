@@ -197,6 +197,15 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 > **Note:** When using `codemate`, these variables are handled automatically through the setup process. This reference is primarily for advanced Docker usage or troubleshooting.
 
+The `codemate` launcher resolves configuration in this order:
+
+1. Command-line options, such as `--repo`, `--branch`, `--agent`, `--mount`, and `--docker-param`
+2. Project `.env`
+3. Ambient shell environment variables
+4. Command-derived values and built-in defaults, such as `git config user.name`, `gh auth token`, and the current repo remote
+
+Docker receives generated environment values from that resolved configuration; the project `.env` file is not passed through directly.
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `CODEMATE_GIT_REPO_URL` | No | Repository URL (defaults to current repo's remote) |
@@ -216,7 +225,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
-`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` are created by the `codemate` launcher from CLI options and passed into the container; do not set them directly in `.env`. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run.
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, and `CODEMATE_NO_PR` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run.
 
 
 ## How It Works

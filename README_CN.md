@@ -222,6 +222,15 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 
 > **注意：** 使用 `codemate` 时，这些变量通过设置过程自动处理。此参考主要用于高级 Docker 使用或故障排除。
 
+`codemate` 启动脚本按以下优先级解析配置：
+
+1. 命令行参数，例如 `--repo`、`--branch`、`--agent`、`--mount` 和 `--docker-param`
+2. 项目 `.env`
+3. 当前 shell 的全局环境变量
+4. 命令推导值和内置默认值，例如 `git config user.name`、`gh auth token` 和当前仓库 remote
+
+Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` 不再直接传入容器。
+
 | 变量 | 必需 | 描述 |
 |----------|----------|-------------|
 | `CODEMATE_GIT_REPO_URL` | 否 | 仓库 URL（默认为当前仓库的 remote） |
@@ -232,14 +241,16 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
 | `SLACK_WEBHOOK` | 否 | Slack Incoming Webhook URL，用于 Claude 停止时的通知 |
+| `LARK_WEBHOOK` | 否 | Lark Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `ANTHROPIC_AUTH_TOKEN` | 否 | Anthropic API token（用于自定义 API 端点） |
 | `ANTHROPIC_BASE_URL` | 否 | Anthropic API 基础 URL（用于自定义 API 端点） |
 | `CODEMATE_DEFAULT_MARKETPLACES` | 否 | 逗号分隔的默认插件市场（默认：`BoringHappy/CodeMate`） |
 | `CODEMATE_DEFAULT_PLUGINS` | 否 | 逗号分隔的默认插件（默认：`git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate`） |
 | `CODEMATE_CUSTOM_MARKETPLACES` | 否 | 逗号分隔的自定义插件市场仓库列表（例如：`username/repo1,org/repo2`） |
 | `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
+| `CODEMATE_SOFT_LINKS` | 否 | 逗号分隔的 `source:destination` 软链接配置（例如：`/data/models:/home/agent/models,/data/cache:/home/agent/.cache`） |
 
-`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY` 和 `CODEMATE_NO_PR` 由 `codemate` 启动脚本根据 CLI 参数创建并传入容器，不应直接在 `.env` 中设置。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`。
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY` 和 `CODEMATE_NO_PR` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`。
 
 
 ## 工作原理
