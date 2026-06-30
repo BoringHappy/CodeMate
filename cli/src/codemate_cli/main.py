@@ -151,7 +151,7 @@ def parse_env_file(path: Path) -> Dict[str, str]:
             parts = shlex.split(raw_value, posix=True)
         except ValueError as exc:
             raise SystemExit(f"{path}:{line_number}: invalid quoted value: {exc}") from exc
-        value = " ".join(parts) if parts else ""
+        value = os.path.expandvars(" ".join(parts) if parts else "")
         values[key] = value
     return values
 
