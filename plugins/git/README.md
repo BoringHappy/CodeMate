@@ -60,7 +60,3 @@ git/
     └── commit/
         └── SKILL.md
 ```
-
-## Version
-
-1.0.3
