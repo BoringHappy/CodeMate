@@ -75,7 +75,7 @@ pipx install git+https://github.com/BoringHappy/CodeMate.git
 codemate --setup
 ```
 
-仓库根目录下的旧 shell launcher 仍保留用于兼容；Python CLI 包位于 `src/` 中。
+`codemate` 命令由 `src/` 中的 Python CLI 包提供。
 
 ### 使用方法
 
@@ -129,7 +129,7 @@ codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:la
 - **全局配置**：`~/.codemate/` - 共享 home 状态；其中每个顶层文件或目录都会用相同名称挂载到 `$HOME`
 - **项目配置**：每个项目目录中的 `.env` - 项目特定的密钥和设置
 
-**仓库 URL 解析**：脚本按以下优先级确定仓库 URL：
+**仓库 URL 解析**：CLI 按以下优先级确定仓库 URL：
 1. `--repo` 命令行参数（最高优先级）
 2. `CODEMATE_GIT_REPO_URL` 环境变量或 `.env` 文件
 3. 当前目录的 git remote origin URL（自动检测）
@@ -164,7 +164,7 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
   - **注意：** 仅与 `--build` 一起使用。要使用预构建 image，请使用 `--image`
 
 当使用 `--build` 时：
-1. 脚本从指定的 Dockerfile 构建 Docker image
+1. CLI 从指定的 Dockerfile 构建 Docker image
 2. 默认 image tag 为 `codemate:local`（除非指定 `--tag`）
 3. 使用本地构建的 image 而不是从 registry 拉取
 4. 使用 `--build` 时会忽略 `--image` 选项
@@ -240,7 +240,7 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 
 > **注意：** 使用 `codemate` 时，这些变量通过设置过程自动处理。此参考主要用于高级 Docker 使用或故障排除。
 
-`codemate` 启动脚本按以下优先级解析配置：
+`codemate` CLI 按以下优先级解析配置：
 
 1. 命令行参数，例如 `--repo`、`--branch`、`--agent`、`--mount` 和 `--docker-param`
 2. 项目 `.env`
