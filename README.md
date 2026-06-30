@@ -45,23 +45,39 @@ On macOS, you need a Docker runtime since Docker doesn't run natively. Choose on
 
 #### Global Installation (Recommended)
 
-Install the Python CLI globally with `uv`:
+Install or upgrade the Python CLI globally with `uv`:
 
 ```bash
 # Recommended
-uv tool install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
+uv tool install --upgrade git+https://github.com/BoringHappy/CodeMate.git
+```
 
-# Alternative if you use pipx
-pipx install git+https://github.com/BoringHappy/CodeMate.git#subdirectory=cli
+If CodeMate is already installed, you can also upgrade it by package name:
 
-# One-time global setup
-codemate --setup
-
-# Update to latest version
+```bash
 uv tool upgrade codemate-cli
 ```
 
-The legacy shell launcher remains at the repository root for compatibility; new CLI work lives in `cli/`.
+Uninstall the CLI with:
+
+```bash
+uv tool uninstall codemate-cli
+```
+
+If you prefer `pipx`, install with:
+
+```bash
+pipx install git+https://github.com/BoringHappy/CodeMate.git
+```
+
+Then run the one-time global setup:
+
+```bash
+# One-time global setup
+codemate --setup
+```
+
+The legacy shell launcher remains at the repository root for compatibility; the Python CLI package lives in `src/`.
 
 ### Usage
 
