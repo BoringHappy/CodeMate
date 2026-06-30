@@ -24,9 +24,34 @@ fi
 
 printf "${GREEN}Starting Codex in tmux session: $CODEX_SESSION${RESET}\n"
 
+# Choose additional Codex instructions based on workflow type.
+if [ -n "$CODEMATE_UPSTREAM_REPO_URL" ]; then
+    # Open-source workflow: use opensource system prompt
+    SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt_opensource.txt"
+    printf "${CYAN}Using open-source workflow Codex instructions${RESET}\n"
+else
+    # Standard workflow: use default system prompt
+    SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt.txt"
+    printf "${CYAN}Using standard workflow Codex instructions${RESET}\n"
+fi
+
 # CodeMate already isolates Codex inside a disposable container, so Codex can
 # operate without a second sandbox or interactive approval prompts.
 CODEX_COMMAND="codex --dangerously-bypass-approvals-and-sandbox"
+if [ -f "$SYSTEM_PROMPT_FILE" ]; then
+    CODEX_DEVELOPER_INSTRUCTIONS_CONFIG="$(
+        python3 - "$SYSTEM_PROMPT_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(f"developer_instructions={json.dumps(Path(sys.argv[1]).read_text())}")
+PY
+    )"
+    printf -v QUOTED_CONFIG '%q' "$CODEX_DEVELOPER_INSTRUCTIONS_CONFIG"
+    CODEX_COMMAND="$CODEX_COMMAND --config $QUOTED_CONFIG"
+fi
+
 if [ -n "$CODEMATE_QUERY" ]; then
     printf -v QUOTED_QUERY '%q' "$CODEMATE_QUERY"
     CODEX_COMMAND="$CODEX_COMMAND $QUOTED_QUERY"

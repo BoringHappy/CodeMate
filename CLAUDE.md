@@ -130,4 +130,4 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 - No test suite exists - this is infrastructure/tooling
 - GitHub Actions workflow (`docker-build.yml`) builds and pushes the combined image to GHCR on main branch and tags
 - GitHub Actions workflow (`docker-build-schedule.yml`) triggers a rebuild every day at 05:00 UTC
-- Multi-platform builds: linux/amd64 and linux/arm64
+- Docker image builds: linux/amd64
