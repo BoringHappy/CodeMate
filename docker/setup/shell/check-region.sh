@@ -55,7 +55,7 @@ ip_matches_entry() {
     [ "$ip" = "$entry" ]
 }
 
-# Fetch a URL with a few retries (these public endpoints are occasionally flaky).
+# Fetch a URL with a few retries (the public endpoint is occasionally flaky).
 curl_retry() {
     local url="$1"
     local out=""
@@ -72,26 +72,24 @@ curl_retry() {
 
 printf "${CYAN}Checking access against CODEMATE_ALLOW_IP='${ALLOW_IP}' / CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}'...${RESET}\n"
 
-# CODEMATE_ALLOW_IP takes precedence: when it is set we only query ifconfig.me
-# and skip the ip-api.com country lookup entirely (one fewer external call).
-# The country allowlist is consulted only when CODEMATE_ALLOW_IP is unset.
+# A single ip-api.com response supplies the IP, country, region, and timezone.
+# CODEMATE_ALLOW_IP still takes precedence when both allowlists are configured.
 ip_matched=false
 country_matched=false
+RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
+CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
+CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
+CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
+CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
+CURRENT_TIMEZONE=$(echo "$RESPONSE" | jq -r '.timezone // empty' 2>/dev/null)
+
+if [ -z "$CURRENT_QUERY_IP" ]; then
+    printf "${RED}Could not detect IP (ip-api.com).${RESET}\n"
+    printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
+    exit 1
+fi
 
 if [ -n "$ALLOW_IP" ]; then
-    # Detect the public IP from ifconfig.me (plain text, just the address).
-    CURRENT_QUERY_IP=$(curl_retry https://ifconfig.me/ip | tr -d '[:space:]' || true)
-    # Fall back to ip-api.com for the IP only if ifconfig.me was unreachable.
-    if [ -z "$CURRENT_QUERY_IP" ]; then
-        RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
-        CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
-    fi
-
-    if [ -z "$CURRENT_QUERY_IP" ]; then
-        printf "${RED}Could not detect IP (ifconfig.me / ip-api.com).${RESET}\n"
-        exit 1
-    fi
-
     IFS=',' read -ra ALLOWED_IP_LIST <<< "$ALLOW_IP"
     for allowed in "${ALLOWED_IP_LIST[@]}"; do
         trimmed="$(echo "$allowed" | xargs)"
@@ -102,13 +100,6 @@ if [ -n "$ALLOW_IP" ]; then
         fi
     done
 else
-    # No IP allowlist configured: fall back to the country allowlist via ip-api.com.
-    RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
-    CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
-    CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
-    CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
-    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
-
     if [ -z "$CURRENT_COUNTRY_CODE" ]; then
         printf "${RED}Could not detect country code (ip-api.com).${RESET}\n"
         printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
@@ -125,7 +116,12 @@ else
     done
 fi
 
-if [ "$ip_matched" = true ] || [ "$country_matched" = true ]; then
+timezone_mismatched=false
+if [ -n "${TZ:-}" ] && [ -n "$CURRENT_TIMEZONE" ] && [ "$CURRENT_TIMEZONE" != "$TZ" ]; then
+    timezone_mismatched=true
+fi
+
+if { [ "$ip_matched" = true ] || [ "$country_matched" = true ]; } && [ "$timezone_mismatched" = false ]; then
     if [ "$ip_matched" = true ]; then
         matched_by="IP '${CURRENT_QUERY_IP}'"
     else
@@ -137,7 +133,29 @@ fi
 
 # Only one allowlist is consulted per run (IP takes precedence over country),
 # so report against whichever check was actually in effect.
-if [ -n "$ALLOW_IP" ]; then
+if [ "$timezone_mismatched" = true ]; then
+    printf "${RED}✗ Timezone mismatch: ip-api.com detected timezone='${CURRENT_TIMEZONE}', but TZ='${TZ}'${RESET}\n"
+
+    ISSUE_TITLE="CodeMate timezone check failed: ${CURRENT_TIMEZONE} does not match ${TZ}"
+    ISSUE_BODY=$(cat <<EOF
+CodeMate refused to start because the timezone detected by ip-api.com does not
+match the container's configured \`TZ\` value.
+
+| Field | Value |
+| --- | --- |
+| Detected timezone (ip-api.com) | \`${CURRENT_TIMEZONE}\` |
+| Configured timezone (TZ) | \`${TZ}\` |
+| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
+| Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
+
+ip-api.com response:
+
+\`\`\`json
+${RESPONSE}
+\`\`\`
+EOF
+)
+elif [ -n "$ALLOW_IP" ]; then
     printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}' is not in the IP allowlist '${ALLOW_IP}'${RESET}\n"
 
     ISSUE_TITLE="CodeMate access check failed: IP ${CURRENT_QUERY_IP} not allowed"
@@ -148,9 +166,15 @@ match \`CODEMATE_ALLOW_IP\`. (\`CODEMATE_ALLOW_IP\` takes precedence; the
 
 | Field | Value |
 | --- | --- |
-| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
+| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
 | Allowed IP(s) | \`${ALLOW_IP}\` |
 | Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
+
+ip-api.com response:
+
+\`\`\`json
+${RESPONSE}
+\`\`\`
 EOF
 )
 else
@@ -181,13 +205,13 @@ fi
 
 if command -v gh >/dev/null 2>&1; then
     if gh issue create --title "$ISSUE_TITLE" --body "$ISSUE_BODY" 2>&1; then
-        printf "${YELLOW}Filed access-mismatch issue on the repository.${RESET}\n"
+        printf "${YELLOW}Filed startup-check issue on the repository.${RESET}\n"
     else
-        printf "${YELLOW}Failed to file access-mismatch issue (gh issue create failed).${RESET}\n"
+        printf "${YELLOW}Failed to file startup-check issue (gh issue create failed).${RESET}\n"
     fi
 else
     printf "${YELLOW}gh CLI not available; skipping issue creation.${RESET}\n"
 fi
 
-printf "${RED}Exiting container due to access mismatch.${RESET}\n"
+printf "${RED}Exiting container due to startup-check mismatch.${RESET}\n"
 exit 1

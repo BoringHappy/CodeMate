@@ -47,7 +47,7 @@ Note: All setup scripts live under `docker/setup/` in the repository, but are co
 - `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`).
 - `CODEMATE_ALLOW_IP` — comma-separated exact IPs or IPv4 CIDR ranges (e.g. `203.0.113.7,198.51.100.0/24`).
 
-At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set; the CLI refuses to start the container otherwise. The container enforces the check at startup. `CODEMATE_ALLOW_IP` takes precedence: if it is set, only the IP allowlist is checked (and only `ifconfig.me` is called); `CODEMATE_ALLOW_COUNTRY` is consulted solely as a fallback when `CODEMATE_ALLOW_IP` is unset. This keeps the check to a single external API call.
+At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set; the CLI refuses to start the container otherwise. The container enforces the check at startup using a single ip-api.com response for the detected IP, country, region, and timezone. `CODEMATE_ALLOW_IP` takes precedence when both allowlists are configured; `CODEMATE_ALLOW_COUNTRY` is consulted solely when `CODEMATE_ALLOW_IP` is unset. The returned timezone must match `TZ`; a mismatch files a GitHub issue and stops startup.
 
 ### Plugin Marketplace
 
