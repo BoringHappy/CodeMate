@@ -55,7 +55,7 @@ ip_matches_entry() {
     [ "$ip" = "$entry" ]
 }
 
-# Fetch a URL with a few retries (these public endpoints are occasionally flaky).
+# Fetch a URL with a few retries (the public endpoint is occasionally flaky).
 curl_retry() {
     local url="$1"
     local out=""
@@ -72,28 +72,24 @@ curl_retry() {
 
 printf "${CYAN}Checking access against CODEMATE_ALLOW_IP='${ALLOW_IP}' / CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}'...${RESET}\n"
 
-# CODEMATE_ALLOW_IP takes precedence: when it is set we only query ifconfig.me
-# and skip the ip-api.com country lookup entirely (one fewer external call).
-# The country allowlist is consulted only when CODEMATE_ALLOW_IP is unset.
+# A single ip-api.com response supplies the IP, country, region, and timezone.
+# CODEMATE_ALLOW_IP still takes precedence when both allowlists are configured.
 ip_matched=false
 country_matched=false
-RESPONSE=""
-CURRENT_TIMEZONE=""
+RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
+CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
+CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
+CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
+CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
+CURRENT_TIMEZONE=$(echo "$RESPONSE" | jq -r '.timezone // empty' 2>/dev/null)
+
+if [ -z "$CURRENT_QUERY_IP" ]; then
+    printf "${RED}Could not detect IP (ip-api.com).${RESET}\n"
+    printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
+    exit 1
+fi
 
 if [ -n "$ALLOW_IP" ]; then
-    # Detect the public IP from ifconfig.me (plain text, just the address).
-    CURRENT_QUERY_IP=$(curl_retry https://ifconfig.me/ip | tr -d '[:space:]' || true)
-    # Fall back to ip-api.com for the IP only if ifconfig.me was unreachable.
-    if [ -z "$CURRENT_QUERY_IP" ]; then
-        RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
-        CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
-    fi
-
-    if [ -z "$CURRENT_QUERY_IP" ]; then
-        printf "${RED}Could not detect IP (ifconfig.me / ip-api.com).${RESET}\n"
-        exit 1
-    fi
-
     IFS=',' read -ra ALLOWED_IP_LIST <<< "$ALLOW_IP"
     for allowed in "${ALLOWED_IP_LIST[@]}"; do
         trimmed="$(echo "$allowed" | xargs)"
@@ -104,13 +100,6 @@ if [ -n "$ALLOW_IP" ]; then
         fi
     done
 else
-    # No IP allowlist configured: fall back to the country allowlist via ip-api.com.
-    RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
-    CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
-    CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
-    CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
-    CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
-
     if [ -z "$CURRENT_COUNTRY_CODE" ]; then
         printf "${RED}Could not detect country code (ip-api.com).${RESET}\n"
         printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
@@ -125,10 +114,6 @@ else
             break
         fi
     done
-fi
-
-if [ -n "$RESPONSE" ]; then
-    CURRENT_TIMEZONE=$(echo "$RESPONSE" | jq -r '.timezone // empty' 2>/dev/null)
 fi
 
 timezone_mismatched=false
@@ -181,9 +166,15 @@ match \`CODEMATE_ALLOW_IP\`. (\`CODEMATE_ALLOW_IP\` takes precedence; the
 
 | Field | Value |
 | --- | --- |
-| Detected IP (ifconfig.me) | \`${CURRENT_QUERY_IP}\` |
+| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
 | Allowed IP(s) | \`${ALLOW_IP}\` |
 | Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
+
+ip-api.com response:
+
+\`\`\`json
+${RESPONSE}
+\`\`\`
 EOF
 )
 else
