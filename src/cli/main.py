@@ -116,6 +116,7 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_ALLOW_IP"),
     Field("CODEMATE_DOCKER_PARAMS", "docker_params", docker_export=False),
     Field("CODEMATE_MOUNTS", "mounts", docker_export=False),
+    Field("TZ", "tz", default="UTC", docker_export=False),
     Field("CODEMATE_DEFAULT_MARKETPLACES", default=DEFAULT_MARKETPLACES, allow_empty_override=True),
     Field("CODEMATE_DEFAULT_PLUGINS", default=DEFAULT_PLUGINS, allow_empty_override=True),
     Field("CODEMATE_CUSTOM_MARKETPLACES"),
@@ -358,6 +359,7 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_row("Agent", value(config, "CODEMATE_AGENT"))
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
+    table.add_row("Timezone", value(config, "TZ"))
     table.add_row("Default plugins", detail_list(default_plugins))
     table.add_row("Custom plugins", detail_list(custom_plugins))
     table.add_row("Default marketplaces", detail_list(default_marketplaces))
@@ -418,6 +420,8 @@ def create_setup_files(cwd: Path) -> None:
             "# CODEMATE_AGENT=claude\n\n"
             "# Optional commit co-author used by the git commit skill\n"
             "# CODEMATE_CO_AUTHOR_BY=Name <email@example.com>\n\n"
+            "# Container timezone (defaults to UTC)\n"
+            "# TZ=UTC\n\n"
             "# Access control. Set at least one allowlist.\n"
             "CODEMATE_ALLOW_COUNTRY=\n"
             "CODEMATE_ALLOW_IP=\n"
@@ -484,6 +488,8 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         *docker_params,
         "-it",
         *volume_args,
+        "--env",
+        f"TZ={value(config, 'TZ')}",
         "--env-file",
         env_path,
         "-w",
@@ -557,6 +563,7 @@ def cli(
     upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
     mount: List[str] = typer.Option([], "--mount", help="Custom volume mount."),
     image: Optional[str] = typer.Option(None, "--image", help=f"Docker image to use. Default: {DEFAULT_IMAGE}"),
+    tz: Optional[str] = typer.Option(None, "--tz", help="Container timezone. Default: UTC"),
     build_image_flag: bool = typer.Option(False, "--build", help="Build Docker image from local Dockerfile."),
     dockerfile: str = typer.Option("docker/Dockerfile", "-f", "--dockerfile", help="Path to Dockerfile."),
     tag: Optional[str] = typer.Option(None, "--tag", help="Image tag for local build."),
@@ -581,6 +588,7 @@ def cli(
         upstream=upstream,
         mount=mount,
         image=image,
+        tz=tz,
         build=build_image_flag,
         dockerfile=dockerfile,
         tag=tag,

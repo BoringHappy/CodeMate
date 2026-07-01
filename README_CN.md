@@ -118,6 +118,9 @@ codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xy
 
 # 中国用户：使用 DaoCloud 镜像加速镜像拉取
 codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:latest
+
+# 使用指定时区运行容器（默认为 UTC）
+codemate --branch feature/xyz --tz Asia/Shanghai
 ```
 
 设置命令将：
@@ -259,6 +262,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_CO_AUTHOR_BY` | 否 | Git commit skill 使用的 commit co-author，例如 `Name <email@example.com>` 或 `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
+| `TZ` | 否 | 容器时区（默认：`UTC`；可通过 `--tz`、`.env` 或当前环境变量覆盖） |
 | `SLACK_WEBHOOK` | 否 | Slack Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `LARK_WEBHOOK` | 否 | Lark Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `ANTHROPIC_AUTH_TOKEN` | 否 | Anthropic API token（用于自定义 API 端点） |
