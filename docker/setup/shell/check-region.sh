@@ -77,6 +77,8 @@ printf "${CYAN}Checking access against CODEMATE_ALLOW_IP='${ALLOW_IP}' / CODEMAT
 # The country allowlist is consulted only when CODEMATE_ALLOW_IP is unset.
 ip_matched=false
 country_matched=false
+RESPONSE=""
+CURRENT_TIMEZONE=""
 
 if [ -n "$ALLOW_IP" ]; then
     # Detect the public IP from ifconfig.me (plain text, just the address).
@@ -125,7 +127,16 @@ else
     done
 fi
 
-if [ "$ip_matched" = true ] || [ "$country_matched" = true ]; then
+if [ -n "$RESPONSE" ]; then
+    CURRENT_TIMEZONE=$(echo "$RESPONSE" | jq -r '.timezone // empty' 2>/dev/null)
+fi
+
+timezone_mismatched=false
+if [ -n "${TZ:-}" ] && [ -n "$CURRENT_TIMEZONE" ] && [ "$CURRENT_TIMEZONE" != "$TZ" ]; then
+    timezone_mismatched=true
+fi
+
+if { [ "$ip_matched" = true ] || [ "$country_matched" = true ]; } && [ "$timezone_mismatched" = false ]; then
     if [ "$ip_matched" = true ]; then
         matched_by="IP '${CURRENT_QUERY_IP}'"
     else
@@ -137,7 +148,29 @@ fi
 
 # Only one allowlist is consulted per run (IP takes precedence over country),
 # so report against whichever check was actually in effect.
-if [ -n "$ALLOW_IP" ]; then
+if [ "$timezone_mismatched" = true ]; then
+    printf "${RED}✗ Timezone mismatch: ip-api.com detected timezone='${CURRENT_TIMEZONE}', but TZ='${TZ}'${RESET}\n"
+
+    ISSUE_TITLE="CodeMate timezone check failed: ${CURRENT_TIMEZONE} does not match ${TZ}"
+    ISSUE_BODY=$(cat <<EOF
+CodeMate refused to start because the timezone detected by ip-api.com does not
+match the container's configured \`TZ\` value.
+
+| Field | Value |
+| --- | --- |
+| Detected timezone (ip-api.com) | \`${CURRENT_TIMEZONE}\` |
+| Configured timezone (TZ) | \`${TZ}\` |
+| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
+| Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
+
+ip-api.com response:
+
+\`\`\`json
+${RESPONSE}
+\`\`\`
+EOF
+)
+elif [ -n "$ALLOW_IP" ]; then
     printf "${RED}✗ Access mismatch: detected ip='${CURRENT_QUERY_IP}' is not in the IP allowlist '${ALLOW_IP}'${RESET}\n"
 
     ISSUE_TITLE="CodeMate access check failed: IP ${CURRENT_QUERY_IP} not allowed"
@@ -181,13 +214,13 @@ fi
 
 if command -v gh >/dev/null 2>&1; then
     if gh issue create --title "$ISSUE_TITLE" --body "$ISSUE_BODY" 2>&1; then
-        printf "${YELLOW}Filed access-mismatch issue on the repository.${RESET}\n"
+        printf "${YELLOW}Filed startup-check issue on the repository.${RESET}\n"
     else
-        printf "${YELLOW}Failed to file access-mismatch issue (gh issue create failed).${RESET}\n"
+        printf "${YELLOW}Failed to file startup-check issue (gh issue create failed).${RESET}\n"
     fi
 else
     printf "${YELLOW}gh CLI not available; skipping issue creation.${RESET}\n"
 fi
 
-printf "${RED}Exiting container due to access mismatch.${RESET}\n"
+printf "${RED}Exiting container due to startup-check mismatch.${RESET}\n"
 exit 1
