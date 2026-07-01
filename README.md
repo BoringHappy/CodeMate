@@ -129,6 +129,9 @@ codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:la
 
 # Pass arbitrary Docker run parameters (e.g. enable GPU access)
 codemate --branch feature/xyz --docker-param "--gpus all"
+
+# Run the container in a specific timezone (defaults to UTC)
+codemate --branch feature/xyz --tz America/New_York
 ```
 
 The setup command will:
@@ -234,6 +237,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_CO_AUTHOR_BY` | No | Commit co-author used by the Git commit skill, e.g. `Name <email@example.com>` or `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
+| `TZ` | No | Container timezone (default: `UTC`; override with `--tz`, `.env`, or the ambient environment) |
 | `SLACK_WEBHOOK` | No | Slack Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
 | `LARK_WEBHOOK` | No | Lark Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
 | `ANTHROPIC_AUTH_TOKEN` | No | Anthropic API token (for custom API endpoints) |
