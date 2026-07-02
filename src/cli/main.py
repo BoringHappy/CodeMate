@@ -257,12 +257,19 @@ def validate_config(config: Mapping[str, ResolvedValue]) -> None:
         raise SystemExit("CODEMATE_GIT_REPO_URL is missing. Use --repo, .env, environment, or git remote origin.")
 
 
-def redact(resolved: ResolvedValue) -> str:
-    if resolved.field and resolved.field.secret and resolved.value:
-        return "***"
-    if resolved.field is None and any(token in resolved.value.lower() for token in ("token", "secret", "password")):
-        return "***"
-    return resolved.value
+def redact(key: str, resolved: ResolvedValue) -> str:
+    keywords = (
+        "password", "passwd", "passphrase", "token", "secret", "api_key", "apikey",
+        "private_key", "access_key", "credential",
+    )
+    secret = resolved.field.secret if resolved.field else any(keyword in key.lower() for keyword in keywords)
+    if not resolved.value or not secret:
+        return resolved.value
+    if len(resolved.value) < 10:
+        return "*" * len(resolved.value)
+    visible = len(resolved.value) // 10
+    hidden = len(resolved.value) - 2 * visible
+    return f"{resolved.value[:visible]}{'*' * hidden}{resolved.value[-visible:]}"
 
 
 def write_env_file(config: Mapping[str, ResolvedValue]) -> tempfile.NamedTemporaryFile:
@@ -476,7 +483,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
 def print_config(config: Mapping[str, ResolvedValue]) -> None:
     for key in sorted(config):
         item = config[key]
-        print(f"{key}={redact(item)} ({item.source})")
+        print(f"{key}={redact(key, item)} ({item.source})")
 
 
 def run_codemate(args: SimpleNamespace) -> None:
