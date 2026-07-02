@@ -360,9 +360,11 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
     table.add_row("Timezone", value(config, "TZ"))
-    table.add_row("Default marketplaces", detail_list(default_marketplaces))
+    if config["CODEMATE_DEFAULT_MARKETPLACES"].source != "default":
+        table.add_row("Default marketplaces", detail_list(default_marketplaces))
     table.add_row("Custom marketplaces", detail_list(custom_marketplaces))
-    table.add_row("Default plugins", detail_list(default_plugins))
+    if config["CODEMATE_DEFAULT_PLUGINS"].source != "default":
+        table.add_row("Default plugins", detail_list(default_plugins))
     table.add_row("Custom plugins", detail_list(custom_plugins))
     table.add_row("Custom mounts", detail_list(mounts))
     table.add_row("Docker params", detail_list(docker_params))
