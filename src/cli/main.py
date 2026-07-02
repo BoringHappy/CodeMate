@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -323,6 +324,14 @@ def detail_list(items: Sequence[str]) -> str:
     return "\n".join(items) if items else "none"
 
 
+def inline_detail_list(items: Sequence[str]) -> str:
+    return (
+        textwrap.fill(" ".join(items), width=120, break_long_words=False, break_on_hyphens=False)
+        if items
+        else "none"
+    )
+
+
 def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
     default_marketplaces = split_csv(value(config, "CODEMATE_DEFAULT_MARKETPLACES"))
     custom_marketplaces = split_csv(value(config, "CODEMATE_CUSTOM_MARKETPLACES"))
@@ -336,10 +345,13 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
         if value(config, key)
     ]
     extra_env_keys = sorted(key for key, item in config.items() if item.field is None)
+    docker_params_text = inline_detail_list(docker_params)
+    extra_env_text = inline_detail_list(extra_env_keys)
+    inline_width = max(len(line) for text in (docker_params_text, extra_env_text) for line in text.splitlines())
 
     table = Table(title="CodeMate Launch Details", show_header=False, box=None, padding=(0, 1))
     table.add_column("Setting", style="cyan", no_wrap=True)
-    table.add_column("Value")
+    table.add_column("Value", min_width=inline_width)
     table.add_row("Target", target_label(config))
     table.add_row("Agent", value(config, "CODEMATE_AGENT"))
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
@@ -352,10 +364,10 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
         table.add_row("Default plugins", detail_list(default_plugins))
     table.add_row("Custom plugins", detail_list(custom_plugins))
     table.add_row("Custom mounts", detail_list(mounts))
-    table.add_row("Docker params", detail_list(docker_params))
-    table.add_row("Extra env", detail_list(extra_env_keys))
+    table.add_row("Docker params", docker_params_text)
+    table.add_row("Extra envs", extra_env_text)
     table.add_row("Allowlist", detail_list(allow_sources))
-    console.print(table)
+    console.print(table, crop=False)
 
 
 def check_prerequisites(config: Mapping[str, ResolvedValue]) -> None:
