@@ -22,12 +22,6 @@ DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
 DEFAULT_MARKETPLACES = "BoringHappy/CodeMate"
 DEFAULT_PLUGINS = "git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
-BLUE = "\033[0;36m"
-GREEN = "\033[0;32m"
-YELLOW = "\033[0;33m"
-RED = "\033[0;31m"
-NC = "\033[0m"
-
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
 console = Console()
 
@@ -53,22 +47,6 @@ class ResolvedValue:
     value: str
     source: str
     field: Optional[Field] = None
-
-
-def print_info(message: str) -> None:
-    print(f"{BLUE}i{NC} {message}")
-
-
-def print_success(message: str) -> None:
-    print(f"{GREEN}+{NC} {message}")
-
-
-def print_warning(message: str) -> None:
-    print(f"{YELLOW}!{NC} {message}")
-
-
-def print_error(message: str) -> None:
-    print(f"{RED}x{NC} {message}", file=sys.stderr)
 
 
 def run_capture(args: Sequence[str]) -> str:
@@ -279,12 +257,19 @@ def validate_config(config: Mapping[str, ResolvedValue]) -> None:
         raise SystemExit("CODEMATE_GIT_REPO_URL is missing. Use --repo, .env, environment, or git remote origin.")
 
 
-def redact(resolved: ResolvedValue) -> str:
-    if resolved.field and resolved.field.secret and resolved.value:
-        return "***"
-    if resolved.field is None and any(token in resolved.value.lower() for token in ("token", "secret", "password")):
-        return "***"
-    return resolved.value
+def redact(key: str, resolved: ResolvedValue) -> str:
+    keywords = (
+        "password", "passwd", "passphrase", "token", "secret", "api_key", "apikey",
+        "private_key", "access_key", "credential",
+    )
+    secret = resolved.field.secret if resolved.field else any(keyword in key.lower() for keyword in keywords)
+    if not resolved.value or not secret:
+        return resolved.value
+    if len(resolved.value) < 10:
+        return "*" * len(resolved.value)
+    visible = len(resolved.value) // 10
+    hidden = len(resolved.value) - 2 * visible
+    return f"{resolved.value[:visible]}{'*' * hidden}{resolved.value[-visible:]}"
 
 
 def write_env_file(config: Mapping[str, ResolvedValue]) -> tempfile.NamedTemporaryFile:
@@ -334,8 +319,8 @@ def target_label(config: Mapping[str, ResolvedValue]) -> str:
     return "none"
 
 
-def detail_list(items: Sequence[str], empty: str = "none") -> str:
-    return "\n".join(items) if items else empty
+def detail_list(items: Sequence[str]) -> str:
+    return "\n".join(items) if items else "none"
 
 
 def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
@@ -360,10 +345,12 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
     table.add_row("Timezone", value(config, "TZ"))
-    table.add_row("Default plugins", detail_list(default_plugins))
-    table.add_row("Custom plugins", detail_list(custom_plugins))
-    table.add_row("Default marketplaces", detail_list(default_marketplaces))
+    if config["CODEMATE_DEFAULT_MARKETPLACES"].source != "default":
+        table.add_row("Default marketplaces", detail_list(default_marketplaces))
     table.add_row("Custom marketplaces", detail_list(custom_marketplaces))
+    if config["CODEMATE_DEFAULT_PLUGINS"].source != "default":
+        table.add_row("Default plugins", detail_list(default_plugins))
+    table.add_row("Custom plugins", detail_list(custom_plugins))
     table.add_row("Custom mounts", detail_list(mounts))
     table.add_row("Docker params", detail_list(docker_params))
     table.add_row("Extra env", detail_list(extra_env_keys))
@@ -375,11 +362,6 @@ def check_prerequisites(config: Mapping[str, ResolvedValue]) -> None:
     missing = [name for name in ("docker", "git", "gh") if shutil.which(name) is None]
     if missing:
         raise SystemExit("Missing required dependencies: " + ", ".join(missing))
-
-    if not value(config, "CODEMATE_GITHUB_TOKEN"):
-        result = subprocess.run(["gh", "auth", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if result.returncode != 0:
-            raise SystemExit("GitHub CLI is not authenticated. Run gh auth login or set CODEMATE_GITHUB_TOKEN.")
 
     docker_info = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if docker_info.returncode != 0:
@@ -426,7 +408,7 @@ def create_setup_files(cwd: Path) -> None:
             "CODEMATE_ALLOW_COUNTRY=\n"
             "CODEMATE_ALLOW_IP=\n"
         )
-    print_success("Setup complete")
+    typer.secho("+ Setup complete", fg=typer.colors.GREEN)
 
 
 def ensure_global_config() -> None:
@@ -501,7 +483,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
 def print_config(config: Mapping[str, ResolvedValue]) -> None:
     for key in sorted(config):
         item = config[key]
-        print(f"{key}={redact(item)} ({item.source})")
+        print(f"{key}={redact(key, item)} ({item.source})")
 
 
 def run_codemate(args: SimpleNamespace) -> None:
