@@ -319,8 +319,8 @@ def target_label(config: Mapping[str, ResolvedValue]) -> str:
     return "none"
 
 
-def detail_list(items: Sequence[str]) -> str:
-    return "\n".join(items) if items else "none"
+def detail_list(items: Sequence[str], separator: str = "\n") -> str:
+    return separator.join(items) if items else "none"
 
 
 def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
@@ -352,8 +352,8 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
         table.add_row("Default plugins", detail_list(default_plugins))
     table.add_row("Custom plugins", detail_list(custom_plugins))
     table.add_row("Custom mounts", detail_list(mounts))
-    table.add_row("Docker params", detail_list(docker_params))
-    table.add_row("Extra env", detail_list(extra_env_keys))
+    table.add_row("Docker params", detail_list(docker_params, " "))
+    table.add_row("Extra env", detail_list(extra_env_keys, " "))
     table.add_row("Allowlist", detail_list(allow_sources))
     console.print(table)
 
