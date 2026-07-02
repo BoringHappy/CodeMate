@@ -22,12 +22,6 @@ DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
 DEFAULT_MARKETPLACES = "BoringHappy/CodeMate"
 DEFAULT_PLUGINS = "git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
-BLUE = "\033[0;36m"
-GREEN = "\033[0;32m"
-YELLOW = "\033[0;33m"
-RED = "\033[0;31m"
-NC = "\033[0m"
-
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
 console = Console()
 
@@ -53,22 +47,6 @@ class ResolvedValue:
     value: str
     source: str
     field: Optional[Field] = None
-
-
-def print_info(message: str) -> None:
-    print(f"{BLUE}i{NC} {message}")
-
-
-def print_success(message: str) -> None:
-    print(f"{GREEN}+{NC} {message}")
-
-
-def print_warning(message: str) -> None:
-    print(f"{YELLOW}!{NC} {message}")
-
-
-def print_error(message: str) -> None:
-    print(f"{RED}x{NC} {message}", file=sys.stderr)
 
 
 def run_capture(args: Sequence[str]) -> str:
@@ -334,8 +312,8 @@ def target_label(config: Mapping[str, ResolvedValue]) -> str:
     return "none"
 
 
-def detail_list(items: Sequence[str], empty: str = "none") -> str:
-    return "\n".join(items) if items else empty
+def detail_list(items: Sequence[str]) -> str:
+    return "\n".join(items) if items else "none"
 
 
 def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
@@ -377,11 +355,6 @@ def check_prerequisites(config: Mapping[str, ResolvedValue]) -> None:
     missing = [name for name in ("docker", "git", "gh") if shutil.which(name) is None]
     if missing:
         raise SystemExit("Missing required dependencies: " + ", ".join(missing))
-
-    if not value(config, "CODEMATE_GITHUB_TOKEN"):
-        result = subprocess.run(["gh", "auth", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if result.returncode != 0:
-            raise SystemExit("GitHub CLI is not authenticated. Run gh auth login or set CODEMATE_GITHUB_TOKEN.")
 
     docker_info = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if docker_info.returncode != 0:
@@ -428,7 +401,7 @@ def create_setup_files(cwd: Path) -> None:
             "CODEMATE_ALLOW_COUNTRY=\n"
             "CODEMATE_ALLOW_IP=\n"
         )
-    print_success("Setup complete")
+    typer.secho("+ Setup complete", fg=typer.colors.GREEN)
 
 
 def ensure_global_config() -> None:
