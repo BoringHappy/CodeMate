@@ -157,3 +157,22 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $SOURCES
+
+  trigger-codemate-build:
+    runs-on: ubuntu-24.04
+    needs: merge
+    permissions:
+      actions: write
+
+    steps:
+      - name: Trigger CodeMate image build
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'docker-build.yml',
+              ref: 'main'
+            });
+            console.log('Triggered CodeMate image build after base image rebuild');
