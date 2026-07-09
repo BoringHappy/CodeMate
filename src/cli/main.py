@@ -86,6 +86,7 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_ISSUE_NUMBER", "issue"),
     Field("CODEMATE_QUERY", "query"),
     Field("CODEMATE_NO_PR", "no_pr"),
+    Field("CODEMATE_CHAT", "chat"),
     Field("CODEMATE_AGENT", "agent", default="claude"),
     Field("CODEMATE_GITHUB_TOKEN", derived=gh_token, secret=True),
     Field("CODEMATE_GIT_USER_NAME", derived=git_user_name),
@@ -354,6 +355,8 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_column("Value", min_width=inline_width)
     table.add_row("Target", target_label(config))
     table.add_row("Agent", value(config, "CODEMATE_AGENT"))
+    if value(config, "CODEMATE_CHAT"):
+        table.add_row("Chat mode", "enabled")
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
     table.add_row("Timezone", value(config, "TZ"))
@@ -414,6 +417,8 @@ def create_setup_files(cwd: Path) -> None:
             "# CODEMATE_AGENT=claude\n\n"
             "# Optional commit co-author used by the git commit skill\n"
             "# CODEMATE_CO_AUTHOR_BY=Name <email@example.com>\n\n"
+            "# Optional chat mode: skips PR creation and CodeMate system prompt injection\n"
+            "# CODEMATE_CHAT=\n\n"
             "# Container timezone (defaults to UTC)\n"
             "# TZ=UTC\n\n"
             "# Access control. Set at least one allowlist.\n"
@@ -440,6 +445,11 @@ def issue_defaults(config: Dict[str, ResolvedValue]) -> None:
         issue_url = f"https://github.com/{repo_path}/issues/{issue}"
         query = f"Please use `/issue:read-issue {issue}` skill to read and address issue #{issue} ({issue_url})"
         config["CODEMATE_QUERY"] = ResolvedValue(query, "derived", FIELD_BY_NAME["CODEMATE_QUERY"])
+
+
+def chat_defaults(config: Dict[str, ResolvedValue]) -> None:
+    if value(config, "CODEMATE_CHAT"):
+        config["CODEMATE_NO_PR"] = ResolvedValue("true", "chat", FIELD_BY_NAME["CODEMATE_NO_PR"])
 
 
 def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, env_path: str) -> List[str]:
@@ -510,6 +520,7 @@ def run_codemate(args: SimpleNamespace) -> None:
     ensure_global_config()
     config = resolve_config(args, cwd)
     issue_defaults(config)
+    chat_defaults(config)
 
     if args.build:
         tag = args.tag or "codemate:local"
@@ -552,6 +563,7 @@ def cli(
     agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent."),
     co_author_by: Optional[str] = typer.Option(None, "--co-author-by", help="Commit co-author, e.g. 'Name <email@example.com>'."),
     no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push."),
+    chat: bool = typer.Option(False, "--chat", help="Run in chat mode: skip PR creation and CodeMate system prompt injection."),
     docker_param: List[str] = typer.Option([], "--docker-param", help="Extra Docker run parameter."),
     repo: Optional[str] = typer.Option(None, "--repo", help="Git repository URL."),
     upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
@@ -577,6 +589,7 @@ def cli(
         agent=agent.value if agent else None,
         co_author_by=co_author_by,
         no_pr=no_pr,
+        chat=chat,
         docker_param=docker_param,
         repo=repo,
         upstream=upstream,

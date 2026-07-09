@@ -104,6 +104,12 @@ codemate --issue 456
 codemate --repo https://github.com/yourname/project.git --upstream https://github.com/maintainer/project.git --branch fix-bug
 codemate --repo https://github.com/yourname/project.git --upstream https://github.com/maintainer/project.git --issue 789
 
+# 跳过新分支的 PR 创建（适用于 fork 或草稿工作）
+codemate --branch feature/xyz --no-pr
+
+# Chat 模式会跳过 PR 创建和 CodeMate system prompt 注入
+codemate --branch feature/xyz --chat
+
 # 使用自定义卷挂载运行（可选）
 codemate --branch feature/xyz --mount ~/data:/data
 
@@ -262,6 +268,8 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_CO_AUTHOR_BY` | 否 | Git commit skill 使用的 commit co-author，例如 `Name <email@example.com>` 或 `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
+| `CODEMATE_NO_PR` | 否 | 跳过 PR 创建和 branch push |
+| `CODEMATE_CHAT` | 否 | Chat 模式；会推导出 `CODEMATE_NO_PR=true` 并跳过 CodeMate system prompt 注入 |
 | `TZ` | 否 | 容器时区（默认：`UTC`；可通过 `--tz`、`.env` 或当前环境变量覆盖） |
 | `SLACK_WEBHOOK` | 否 | Slack Incoming Webhook URL，用于 Claude 停止时的通知 |
 | `LARK_WEBHOOK` | 否 | Lark Incoming Webhook URL，用于 Claude 停止时的通知 |
@@ -273,7 +281,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
 | `CODEMATE_SOFT_LINKS` | 否 | 逗号分隔的 `source:destination` 软链接配置（例如：`/data/models:/home/agent/models,/data/cache:/home/agent/.cache`） |
 
-`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR`、`CODEMATE_CHAT` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --chat` 可跳过 PR 创建和 CodeMate system prompt 注入；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
 
 
 ## 工作原理
@@ -283,8 +291,8 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 启动时，容器会：
 1. clone/更新 repository 到 `/home/agent/<repo-name>`
 2. checkout 指定的 branch 或 PR
-3. 如果在新 branch 上工作，则创建 PR
-4. 在对应的 tmux session 中启动 Claude Code 或 Codex
+3. 如果在新 branch 上工作，则创建 PR（除非使用 `--no-pr`、`--chat` 或 fork 工作流）
+4. 在对应的 tmux session 中启动 Claude Code 或 Codex；除非启用 chat 模式，否则会附加 CodeMate 指令
 5. 如果提供了 `--query`，则向所选 agent 发送初始 query
 6. 运行 cron job 监控 PR 评论（每分钟）
 
