@@ -112,6 +112,9 @@ codemate --repo https://github.com/yourname/project.git --upstream https://githu
 # Skip PR creation on new branches (useful for forks or draft work)
 codemate --branch feature/xyz --no-pr
 
+# Chat mode skips PR creation and CodeMate system prompt injection
+codemate --branch feature/xyz --chat
+
 # Run with custom volume mounts (optional)
 codemate --branch feature/xyz --mount ~/data:/data
 
@@ -237,6 +240,8 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_CO_AUTHOR_BY` | No | Commit co-author used by the Git commit skill, e.g. `Name <email@example.com>` or `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
+| `CODEMATE_NO_PR` | No | Skip PR creation and branch push |
+| `CODEMATE_CHAT` | No | Chat mode; derives `CODEMATE_NO_PR=true` and skips CodeMate system prompt injection |
 | `TZ` | No | Container timezone (default: `UTC`; override with `--tz`, `.env`, or the ambient environment) |
 | `SLACK_WEBHOOK` | No | Slack Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
 | `LARK_WEBHOOK` | No | Lark Incoming Webhook URL for notifications when Claude stops (only sent if new commits exist) |
@@ -248,7 +253,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
-`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, `CODEMATE_CHAT`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, `codemate --chat` to skip PR creation and CodeMate system prompt injection, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
 
 
 ## How It Works
@@ -260,9 +265,9 @@ On startup, the container:
 2. Authenticates GitHub CLI with token
 3. Clones/updates repository to `/home/agent/<repo-name>`
 4. Checks out the specified branch or PR
-5. Creates a draft PR if working on a new branch (unless `--no-pr` or fork workflow)
+5. Creates a draft PR if working on a new branch (unless `--no-pr`, `--chat`, or fork workflow)
 6. Installs/updates plugins for the selected agent from configured marketplaces
-7. Starts Claude Code or Codex in the matching tmux session
+7. Starts Claude Code or Codex in the matching tmux session, appending CodeMate instructions unless chat mode is enabled
 8. Sends the initial query to the selected agent if `--query` is provided
 9. Runs a cron job every minute to monitor the PR for new comments, CI failures, and review-ready state
 

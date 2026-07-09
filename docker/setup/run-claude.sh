@@ -29,18 +29,25 @@ fi
 # Start Claude Code in a detached tmux session
 printf "${GREEN}Starting Claude Code in tmux session: $CLAUDE_SESSION${RESET}\n"
 
-# Choose system prompt based on workflow type
-if [ -n "$CODEMATE_UPSTREAM_REPO_URL" ]; then
-    # Open-source workflow: use opensource system prompt
-    SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt_opensource.txt"
-    printf "${CYAN}Using open-source workflow system prompt${RESET}\n"
+CLAUDE_COMMAND="claude --dangerously-skip-permissions"
+if [ -n "$CODEMATE_CHAT" ]; then
+    printf "${CYAN}Chat mode enabled; skipping CodeMate system prompt${RESET}\n"
 else
-    # Standard workflow: use default system prompt
-    SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt.txt"
-    printf "${CYAN}Using standard workflow system prompt${RESET}\n"
+    # Choose system prompt based on workflow type
+    if [ -n "$CODEMATE_UPSTREAM_REPO_URL" ]; then
+        # Open-source workflow: use opensource system prompt
+        SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt_opensource.txt"
+        printf "${CYAN}Using open-source workflow system prompt${RESET}\n"
+    else
+        # Standard workflow: use default system prompt
+        SYSTEM_PROMPT_FILE="$SETUP_DIR/prompt/system_prompt.txt"
+        printf "${CYAN}Using standard workflow system prompt${RESET}\n"
+    fi
+
+    CLAUDE_COMMAND="$CLAUDE_COMMAND --append-system-prompt \"\$(cat $SYSTEM_PROMPT_FILE)\""
 fi
 
-tmux new-session -d -s "$CLAUDE_SESSION" "claude --dangerously-skip-permissions --append-system-prompt \"\$(cat $SYSTEM_PROMPT_FILE)\""
+tmux new-session -d -s "$CLAUDE_SESSION" "$CLAUDE_COMMAND"
 
 # Send initial query if provided
 if [ -n "$CODEMATE_QUERY" ]; then
