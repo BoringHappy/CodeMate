@@ -27,12 +27,11 @@ ENV CODEMATE_DEFAULT_PLUGINS="git@codemate,pr@codemate,dev@codemate,issue@codema
 
 # Switch to agent user and install both supported coding agents.
 USER agent
-ENV PATH="/home/agent/.local/bin:${PATH}"
+# Prefer npm-managed tools over any persisted standalone symlink in ~/.local/bin.
+ENV PATH="/usr/local/share/npm-global/bin:/home/agent/.local/bin:${PATH}"
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && npm install -g @cometix/ccline
-RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh \
-    && sudo ln -sf /home/agent/.local/bin/codex /usr/local/bin/codex \
-    && /usr/local/bin/codex --version
+    && npm install -g @cometix/ccline @openai/codex@latest \
+    && codex --version
 
 ENTRYPOINT ["/usr/local/bin/setup/setup.sh"]
 CMD ["/usr/local/bin/setup/run.sh"]
