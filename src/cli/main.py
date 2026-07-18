@@ -519,7 +519,6 @@ def run_codemate(args: SimpleNamespace) -> None:
 
     ensure_global_config()
     config = resolve_config(args, cwd)
-    issue_defaults(config)
     chat_defaults(config)
 
     if args.build:
@@ -527,11 +526,14 @@ def run_codemate(args: SimpleNamespace) -> None:
         build_image(args.dockerfile, tag)
         config["CODEMATE_IMAGE"] = ResolvedValue(tag, "build", FIELD_BY_NAME["CODEMATE_IMAGE"])
 
+    if not args.config:
+        validate_config(config)
+
+    issue_defaults(config)
+
     if args.config:
         print_config(config)
         return
-
-    validate_config(config)
 
     if not args.dry_run:
         check_prerequisites(config)
