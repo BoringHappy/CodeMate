@@ -43,13 +43,16 @@ fi
 2. **Create the spec issue** — write the body to a temp file, then create the issue. If a spec template was found in preflight, mirror its section headings exactly. Otherwise use the default format below:
 
    ```bash
-   printf '%s' "<body content>" > /tmp/spec-body.md
+   SPEC_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/codemate-spec-body.XXXXXX")
+   trap 'rm -f "$SPEC_BODY_FILE"' EXIT
+   printf '%s' "<body content>" > "$SPEC_BODY_FILE"
 
    SPEC_URL=$(gh issue create \
      --title "[Spec]: $ARGUMENTS" \
      --label "spec" \
-     --body-file /tmp/spec-body.md)
-   rm -f /tmp/spec-body.md
+     --body-file "$SPEC_BODY_FILE")
+   rm -f "$SPEC_BODY_FILE"
+   trap - EXIT
    SPEC_NUMBER=$(echo "$SPEC_URL" | grep -oE '[0-9]+$')
    REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
    gh api -X PATCH repos/$REPO/issues/$SPEC_NUMBER --field type=Spec

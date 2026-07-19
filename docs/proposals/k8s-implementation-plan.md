@@ -4,6 +4,11 @@
 **Status:** Draft
 **Branch:** `proposal-k8s-design`
 
+> **Legacy baseline note (2026-07):** The local Docker workflow has since moved PR polling into
+> the workspace plugin's native Stop hook, with per-session/per-branch state and no cron or tmux
+> prompt injection. References below to `monitor-pr.sh`, global `/tmp` state, and cron describe the
+> baseline that existed when this proposal was written and need re-baselining before implementation.
+
 This plan turns the architecture proposal into concrete, sequenced work. It maps each phase from
 §9 of the proposal to workstreams with deliverables, the existing files they reuse/replace, and
 acceptance criteria. Each phase is independently shippable and leaves the system working.

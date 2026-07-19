@@ -20,7 +20,7 @@ CodeMate 通过在隔离的 Docker 容器中运行 Claude Code 来解决这个�
 - 持久化 Claude 配置
 - 内置 Claude Code Skills 用于 PR 工作流自动化
 - Slack 通知（当 Claude 停止时，需配置 `SLACK_WEBHOOK`）
-- tmux 会话管理与 PR 评论监控
+- tmux 会话管理，以及基于 Claude/Codex 原生 Stop hook 的 PR 评论监控
 
 ## 快速开始
 
@@ -269,6 +269,9 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_HOME` | 否 | 宿主机上的 CodeMate home 目录；支持 `~` 和 `$VAR` 展开（默认：`~/.codemate`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
+| `CODEMATE_AGENT_SESSION` | 否 | 覆盖 tmux session 名称（默认使用 instance 级名称） |
+| `CODEMATE_INSTANCE_ID` | 否 | 区分同一主机或容器内并发 agent 进程的 runtime instance 名称 |
+| `CODEMATE_RUNTIME_DIR` | 否 | 覆盖 session 级 hook 状态根目录（默认 `$XDG_RUNTIME_DIR/codemate` 或 `/tmp/codemate-<uid>`） |
 | `CODEMATE_NO_PR` | 否 | 跳过 PR 创建和 branch push |
 | `CODEMATE_CHAT` | 否 | Chat 模式；会推导出 `CODEMATE_NO_PR=true` 并跳过 CodeMate system prompt 注入 |
 | `TZ` | 否 | 容器时区（默认：`UTC`；可通过 `--tz`、`.env` 或当前环境变量覆盖） |
@@ -295,7 +298,7 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 3. 如果在新 branch 上工作，则创建 PR（除非使用 `--no-pr`、`--chat` 或 fork 工作流）
 4. 在对应的 tmux session 中启动 Claude Code 或 Codex；除非启用 chat 模式，否则会附加 CodeMate 指令
 5. 如果提供了 `--query`，则向所选 agent 发送初始 query
-6. 运行 cron job 监控 PR 评论（每分钟）
+6. 在 agent 空闲时，通过 workspace 插件的 Stop hook 监控 PR 评论、CI 失败和 review-ready 状态
 
 ## Skills
 
@@ -371,7 +374,15 @@ CODEMATE_CUSTOM_PLUGINS=example-skill@my-plugins
 
 ## PR Comment 监控
 
-CodeMate 自动监控 PR comments，并在新反馈到达时通知 Claude。cron job 每分钟运行一次以检查新 comments。
+CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第一次检查立即运行，后续检查按 10、30、60、120 秒退避，最大间隔保持 120 秒；不再依赖 cron，也不再通过 tmux 注入 prompt。Claude 使用 `asyncRewake` 在后台 polling，保持 UI 可交互；Codex 目前不运行 async command hook，因此使用同步 Stop continuation contract。
+
+每次调用 `gh` 之前，hook 都会确认当前 session 仍为 Stop 状态，并确认当前 worktree/branch 仍有关联的 open PR。如果用户提交了新 prompt，正在运行的 monitor 会退出。检测到反馈时，Claude 通过 `asyncRewake` 被唤醒，Codex 则收到结构化 Stop continuation；两者都会原生创建下一轮处理。
+
+### 状态隔离
+
+- Session 状态按 runtime instance、agent 和 `session_id` 分目录保存；monitor cursor、通知 commit baseline 和 retry counter 再按 Git worktree 和 branch 隔离。
+- PR 状态按 worktree 和 branch 保存在 `<absolute-git-dir>/codemate/pr-status/<branch>.json`。
+- 不再使用 `/tmp/.session_status`、`/tmp/.pr_status`、`/tmp/pr-monitor-state` 等全局共享文件。
 
 ### 评论类型
 
@@ -387,29 +398,29 @@ GitHub PR 有两种类型的评论，CodeMate 会监控：
 当有人留下 **review comment**（inline code comment）时：
 
 1. 监控检测到未解决的 review comments
-2. 向 Claude 发送消息：`"Please Use /fix-comments skill to address comments"`
-3. Claude 使用 `/pr:fix-comments` skill：
+2. 通过 Stop continuation 请求所选 agent 使用 `pr:fix-comments`
+3. Agent 使用该 workflow：
    - 读取反馈
    - 进行代码更改
    - commit 并推送
-   - 回复 "Claude Replied: ..." 标记为已解决
+   - 回复 "CodeMate Replied: ..." 标记为已解决
 
 ### Issue Comment Workflow
 
 当有人留下 **issue comment**（一般 PR comment）时：
 
 1. 监控检测到没有 👀 reaction 的新 issue comments
-2. 将实际 comment 内容发送给 Claude
-3. Claude 处理请求
-4. Claude 使用 `/pr:ack-comments` skill 添加 👀 reaction
+2. 通过 Stop continuation 将实际 comment 内容发送给所选 agent
+3. Agent 处理请求
+4. Agent 使用 `pr:ack-comments` 添加 👀 reaction
 5. 未来运行会跳过带有 👀 reaction 的 comments
 
 ### Filtering Logic
 
 Comments 在以下情况下会被过滤掉：
-- 以 "Claude Replied:" 开头（已处理）
+- 以 "CodeMate Replied:" 开头（已处理）
 - 有 👀 reaction（已确认）
-- 由 Claude 自己创建
+- 由 bot 创建（login 以 `[bot]` 结尾）
 
 ## 最佳实践
 

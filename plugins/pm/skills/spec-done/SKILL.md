@@ -53,9 +53,12 @@ Using the spec issue, sub-issues, and linked PRs fetched above:
 
    gh label create "done" --color "0E8A16" --description "Spec is complete" --force 2>/dev/null || true
 
-   printf '%s' "<done summary markdown>" > /tmp/spec-done-summary.md
-   gh issue comment "$ARGUMENTS" --body-file /tmp/spec-done-summary.md
-   rm -f /tmp/spec-done-summary.md
+   DONE_SUMMARY_FILE=$(mktemp "${TMPDIR:-/tmp}/codemate-spec-done.XXXXXX")
+   trap 'rm -f "$DONE_SUMMARY_FILE"' EXIT
+   printf '%s' "<done summary markdown>" > "$DONE_SUMMARY_FILE"
+   gh issue comment "$ARGUMENTS" --body-file "$DONE_SUMMARY_FILE"
+   rm -f "$DONE_SUMMARY_FILE"
+   trap - EXIT
 
    gh issue edit "$ARGUMENTS" --add-label "done"
    gh issue close "$ARGUMENTS"

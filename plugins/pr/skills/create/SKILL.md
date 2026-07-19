@@ -100,9 +100,25 @@ PR_URL=$(gh pr view --json url -q .url)
 
 ### 4. Update PR Status File
 
-**IMPORTANT**: After successfully creating the PR, update the status file:
+**IMPORTANT**: After successfully creating the PR, write branch-scoped status
+under the current Git worktree so concurrent repositories, branches, and agent
+sessions cannot overwrite each other:
 ```bash
-echo "$PR_URL" > /tmp/.pr_status
+CURRENT_BRANCH=$(git branch --show-current)
+[ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"
+PR_NUMBER=${PR_URL%/}
+PR_NUMBER=${PR_NUMBER##*/}
+PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"
+mkdir -p "$(dirname "$PR_STATUS_FILE")"
+PR_STATUS_TMP=$(mktemp "$(dirname "$PR_STATUS_FILE")/.pr-status.XXXXXX")
+jq -n \
+  --arg branch "$CURRENT_BRANCH" \
+  --arg url "$PR_URL" \
+  --argjson number "$PR_NUMBER" \
+  --arg updated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  '{state: "open", branch: $branch, number: $number, url: $url, updated_at: $updated_at}' \
+  > "$PR_STATUS_TMP"
+mv "$PR_STATUS_TMP" "$PR_STATUS_FILE"
 echo "✓ PR created and status saved: $PR_URL"
 ```
 
@@ -124,4 +140,5 @@ Show the user:
 
 - This skill handles both standard and fork workflows automatically
 - For fork workflows, it creates a cross-repo PR from your fork to the upstream repository
-- The PR status is saved to `/tmp/.pr_status` for other skills to use
+- PR status is stored per Git worktree and branch under
+  `<absolute-git-dir>/codemate/pr-status/<branch>.json`

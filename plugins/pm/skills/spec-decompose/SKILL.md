@@ -152,13 +152,16 @@ printf '%s\n' "$spec_body"
 
    b. Write the task body to a temp file and create the issue:
    ```bash
-   printf '%s' "<body content>" > /tmp/task-body.md
+   TASK_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/codemate-task-body.XXXXXX")
+   trap 'rm -f "$TASK_BODY_FILE"' EXIT
+   printf '%s' "<body content>" > "$TASK_BODY_FILE"
 
    TASK_URL=$(gh issue create \
      --title "<task title>" \
      --label "task" \
-     --body-file /tmp/task-body.md)
-   rm -f /tmp/task-body.md
+     --body-file "$TASK_BODY_FILE")
+   rm -f "$TASK_BODY_FILE"
+   trap - EXIT
    ```
 
    c. Get the task issue's numeric ID (not number):

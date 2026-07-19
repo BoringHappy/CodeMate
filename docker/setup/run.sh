@@ -20,7 +20,10 @@ esac
 
 source "$SETUP_DIR/shell/common.sh"
 
-printf "${GREEN}Starting cron daemon...${RESET}\n"
-sudo service cron start || sudo cron || true
+# Identify this runtime independently from the agent's own session ID. Hook
+# state keys by instance, agent, session, and workspace so multiple agent
+# processes can safely share one host or container.
+CODEMATE_INSTANCE_ID="${CODEMATE_INSTANCE_ID:-${CODEMATE_AGENT}-$(hostname)-$$}"
+export CODEMATE_INSTANCE_ID
 
 exec "$AGENT_RUNNER"

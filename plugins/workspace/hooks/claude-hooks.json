@@ -28,7 +28,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/stop.sh",
+            "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/record_session_status.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/claude_stop.sh",
+            "asyncRewake": true,
             "timeout": 604800,
             "statusMessage": "Monitoring pull request feedback"
           }

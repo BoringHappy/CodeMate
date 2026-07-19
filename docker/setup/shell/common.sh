@@ -116,7 +116,17 @@ send_and_verify_command() {
     local command="$2"
     local max_attempts="${3:-3}"
     local attempt=1
-    local SESSION_STATUS_FILE="/tmp/.session_status"
+    local runtime_root marker submitted status_file
+
+    if [ -n "${CODEMATE_RUNTIME_DIR:-}" ]; then
+        runtime_root="$CODEMATE_RUNTIME_DIR"
+    elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        runtime_root="$XDG_RUNTIME_DIR/codemate"
+    else
+        runtime_root="${TMPDIR:-/tmp}/codemate-$(id -u)"
+    fi
+    mkdir -p "$runtime_root/sessions"
+    marker=$(mktemp "$runtime_root/.prompt-submit.XXXXXX")
 
     # Send the command
     # Use literal "Enter" key name rather than C-m: with extended-keys always
@@ -130,27 +140,34 @@ send_and_verify_command() {
     while [ $attempt -le $max_attempts ]; do
         sleep 3
 
-        if [ -f "$SESSION_STATUS_FILE" ]; then
-            STATUS=$(cat "$SESSION_STATUS_FILE" 2>/dev/null || echo "")
-            if [ "$STATUS" = "UserPromptSubmit" ]; then
-                printf "${GREEN}Command submitted successfully (attempt $attempt)${RESET}\n"
-                return 0
-            else
-                printf "${YELLOW}Command not submitted (status: $STATUS), attempt $attempt/$max_attempts${RESET}\n"
-                if [ $attempt -lt $max_attempts ]; then
-                    tmux send-keys -t "$session_name" Enter
-                fi
+        submitted=false
+        while IFS= read -r -d '' status_file; do
+            if jq -e \
+                --arg instance_id "${CODEMATE_INSTANCE_ID:-}" \
+                '.event == "UserPromptSubmit" and .instance_id == $instance_id' \
+                "$status_file" >/dev/null 2>&1; then
+                submitted=true
+                break
             fi
+        done < <(find "$runtime_root/sessions" -type f -name status.json -newer "$marker" -print0 2>/dev/null)
+
+        if [ "$submitted" = "true" ]; then
+            rm -f "$marker"
+            printf "${GREEN}Command submitted successfully (attempt $attempt)${RESET}\n"
+            return 0
         else
-            printf "${YELLOW}Session status file not found on attempt $attempt${RESET}\n"
+            printf "${YELLOW}Command submission not observed, attempt $attempt/$max_attempts${RESET}\n"
+            if [ $attempt -lt $max_attempts ]; then
+                tmux send-keys -t "$session_name" Enter
+            fi
         fi
 
         attempt=$((attempt + 1))
     done
 
+    rm -f "$marker"
     printf "${YELLOW}Max retry attempts reached, continuing anyway${RESET}\n"
     return 0
 }
-
 
 
