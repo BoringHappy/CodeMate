@@ -7,8 +7,10 @@ source "$SCRIPT_DIR/hook_common.sh"
 
 HOOK_INPUT=$(cat)
 SESSION_DIR=$(codemate_session_dir "$HOOK_INPUT") || exit 0
+EVENT_FINGERPRINT=$(codemate_event_fingerprint "$HOOK_INPUT") || exit 0
 WORKSPACE_DIR=$(codemate_workspace_dir "$HOOK_INPUT") || exit 0
-MONITOR_STATE_FILE="$WORKSPACE_DIR/pr-monitor-state.json"
+MONITOR_STATE_FILE=""
+BRANCH_MONITOR_LOCK_FILE=""
 MONITOR_LOG_FILE="$WORKSPACE_DIR/pr-monitor.log"
 
 LAST_ISSUE_COMMENT_ID=0
@@ -42,9 +44,10 @@ load_monitor_state() {
 
 save_monitor_state() {
     local pr_number="$1"
-    local tmp
+    local state_dir tmp
 
-    tmp=$(mktemp "$WORKSPACE_DIR/.pr-monitor-state.XXXXXX") || return 1
+    state_dir=$(dirname "$MONITOR_STATE_FILE")
+    tmp=$(mktemp "$state_dir/.pr-monitor-state.XXXXXX") || return 1
     jq -n \
         --argjson pr_number "$pr_number" \
         --argjson last_issue_comment_id "$LAST_ISSUE_COMMENT_ID" \
@@ -65,8 +68,19 @@ save_monitor_state() {
     mv "$tmp" "$MONITOR_STATE_FILE"
 }
 
+acquire_branch_monitor() {
+    local pr_number="$1"
+
+    exec 8>"$BRANCH_MONITOR_LOCK_FILE"
+    while session_can_poll && local_pr_can_poll "$pr_number"; do
+        flock -n 8 && return 0
+        sleep 1
+    done
+    return 1
+}
+
 session_can_poll() {
-    codemate_session_is_stopped "$SESSION_DIR"
+    codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT"
 }
 
 local_pr_can_poll() {
@@ -165,7 +179,7 @@ check_ci_status() {
             failure_logs="${failure_logs:0:4000}"
         fi
     fi
-    session_can_poll || return 0
+    session_can_poll && local_pr_can_poll "$pr_number" || return 0
 
     commit_instruction=$(agent_instruction "using /git:commit" "using the git:commit skill")
     ACTION_MESSAGE="CI checks failed for PR #$pr_number. Please analyze and fix the failures.
@@ -219,7 +233,7 @@ check_issue_comments() {
 
     comments=$(gh_guarded "$pr_number" api --paginate "repos/:owner/:repo/issues/$pr_number/comments" \
         --jq '.[]' 2>/dev/null | jq -s '.') || return 2
-    session_can_poll || return 0
+    session_can_poll && local_pr_can_poll "$pr_number" || return 0
     [ "$(printf '%s' "$comments" | jq 'length')" -gt 0 ] || return 0
 
     max_id=$(printf '%s' "$comments" | jq 'map(.id) | max // 0')
@@ -253,11 +267,11 @@ After addressing it, $ack_instruction to add a 👀 reaction."
 
 check_review_comments() {
     local pr_number="$1"
-    local comments max_id actionable comment_summary fix_instruction
+    local comments max_id actionable selected comment_summary fix_instruction
 
     comments=$(gh_guarded "$pr_number" api --paginate "repos/:owner/:repo/pulls/$pr_number/comments" \
         --jq '.[]' 2>/dev/null | jq -s '.') || return 2
-    session_can_poll || return 0
+    session_can_poll && local_pr_can_poll "$pr_number" || return 0
     [ "$(printf '%s' "$comments" | jq 'length')" -gt 0 ] || return 0
 
     max_id=$(printf '%s' "$comments" | jq 'map(.id) | max // 0')
@@ -266,14 +280,18 @@ check_review_comments() {
         sort_by(.id) |
         group_by(.in_reply_to_id // .id) |
         map(.[-1]) |
+        sort_by(.id) |
         map(select(.id > $cursor)) |
         map(select((.body | startswith("CodeMate Replied:")) | not))
     ')
-    LAST_REVIEW_COMMENT_ID="$max_id"
-    [ "$(printf '%s' "$actionable" | jq 'length')" -gt 0 ] || return 0
+    if [ "$(printf '%s' "$actionable" | jq 'length')" -eq 0 ]; then
+        LAST_REVIEW_COMMENT_ID="$max_id"
+        return 0
+    fi
 
-    comment_summary=$(printf '%s' "$actionable" | jq -r '
-        .[0:3] |
+    selected=$(printf '%s' "$actionable" | jq -c '.[0:3]')
+    LAST_REVIEW_COMMENT_ID=$(printf '%s' "$selected" | jq 'map(.id) | max')
+    comment_summary=$(printf '%s' "$selected" | jq -r '
         map(
             "- comment_id: \(.id)\n  path: \(.path)\n  line: \(.line // .original_line // "unknown")\n  author: @\(.user.login)\n  body:\n  \((.body[0:1800]) | split("\n") | join("\n  "))"
         ) | join("\n\n")
@@ -299,7 +317,7 @@ poll_once() {
         return 2
     fi
     CONSECUTIVE_FAILURES=0
-    session_can_poll || return 3
+    session_can_poll && local_pr_can_poll "$pr_number" || return 3
 
     remote_state=$(printf '%s' "$pr_data" | jq -r '.state // "UNKNOWN"')
     pr_url=$(printf '%s' "$pr_data" | jq -r '.url // ""')
@@ -340,6 +358,10 @@ main() {
     session_can_poll || exit 0
     codemate_load_pr_reference || exit 0
     pr_number="$CODEMATE_CURRENT_PR_NUMBER"
+    MONITOR_STATE_FILE="$CODEMATE_CURRENT_PR_STATUS_FILE.monitor-state.json"
+    BRANCH_MONITOR_LOCK_FILE="$CODEMATE_CURRENT_PR_STATUS_FILE.monitor.lock"
+    acquire_branch_monitor "$pr_number" || exit 0
+    session_can_poll && local_pr_can_poll "$pr_number" || exit 0
     load_monitor_state "$pr_number"
     log_monitor "Monitoring PR #$pr_number for session $(codemate_session_id "$HOOK_INPUT")"
 
@@ -354,7 +376,7 @@ main() {
 
         case "$poll_result" in
             1)
-                session_can_poll || exit 0
+                session_can_poll && local_pr_can_poll "$pr_number" || exit 0
                 log_monitor "Continuing agent for PR #$pr_number"
                 emit_continuation "$ACTION_MESSAGE"
                 exit 0

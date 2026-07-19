@@ -55,6 +55,20 @@ codemate_session_id() {
     printf '%s' "$input" | jq -er '.session_id | select(type == "string" and length > 0)' 2>/dev/null
 }
 
+codemate_event_fingerprint() {
+    local input="$1"
+
+    printf '%s' "$input" | jq -cS '{
+        session_id,
+        turn_id: (.turn_id // null),
+        hook_event_name,
+        cwd,
+        stop_hook_active: (.stop_hook_active // null),
+        last_assistant_message: (.last_assistant_message // null),
+        prompt: (.prompt // null)
+    }' 2>/dev/null | sha256sum | awk '{print $1}'
+}
+
 codemate_session_dir() {
     local input="$1"
     local session_id agent instance_id safe_session safe_agent safe_instance root
@@ -100,11 +114,12 @@ codemate_workspace_dir() {
 
 codemate_record_session_status() {
     local input="$1"
-    local session_dir session_id event cwd branch updated_at tmp current_commit workspace_dir
+    local session_dir session_id event event_fingerprint cwd branch updated_at tmp current_commit workspace_dir
 
     session_dir=$(codemate_session_dir "$input") || return 1
     session_id=$(codemate_session_id "$input") || return 1
     event=$(printf '%s' "$input" | jq -r '.hook_event_name // "Unknown"')
+    event_fingerprint=$(codemate_event_fingerprint "$input") || return 1
     cwd=$(printf '%s' "$input" | jq -r '.cwd // ""')
     updated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     branch=""
@@ -118,6 +133,7 @@ codemate_record_session_status() {
         --arg instance_id "${CODEMATE_INSTANCE_ID:-}" \
         --arg agent "$(codemate_agent_name)" \
         --arg event "$event" \
+        --arg event_fingerprint "$event_fingerprint" \
         --arg cwd "$cwd" \
         --arg branch "$branch" \
         --arg updated_at "$updated_at" \
@@ -126,6 +142,7 @@ codemate_record_session_status() {
             instance_id: $instance_id,
             agent: $agent,
             event: $event,
+            event_fingerprint: $event_fingerprint,
             cwd: $cwd,
             branch: $branch,
             updated_at: $updated_at
@@ -147,7 +164,15 @@ codemate_record_session_status() {
 
 codemate_session_is_stopped() {
     local session_dir="$1"
-    jq -e '.event == "Stop"' "$session_dir/status.json" >/dev/null 2>&1
+    local expected_fingerprint="${2:-}"
+
+    if [ -n "$expected_fingerprint" ]; then
+        jq -e --arg fingerprint "$expected_fingerprint" \
+            '.event == "Stop" and .event_fingerprint == $fingerprint' \
+            "$session_dir/status.json" >/dev/null 2>&1
+    else
+        jq -e '.event == "Stop"' "$session_dir/status.json" >/dev/null 2>&1
+    fi
 }
 
 codemate_truthy() {

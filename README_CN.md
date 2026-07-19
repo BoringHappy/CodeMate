@@ -380,8 +380,8 @@ CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第�
 
 ### 状态隔离
 
-- Session 状态按 runtime instance、agent 和 `session_id` 分目录保存；monitor cursor、通知 commit baseline 和 retry counter 再按 Git worktree 和 branch 隔离。
-- PR 状态按 worktree 和 branch 保存在 `<absolute-git-dir>/codemate/pr-status/<branch>.json`。
+- Session 状态按 runtime instance、agent 和 `session_id` 分目录保存；通知 commit baseline 和 retry counter 再按 Git worktree 和 branch 隔离。
+- PR 状态按 worktree 和 branch 保存在 `<absolute-git-dir>/codemate/pr-status/<branch>.json`，相邻的 monitor-state 和 lock 文件保存共享 cursor 与可中断 branch lease，保证同一个 PR event 只由一个已 Stop 的 session 处理。
 - 不再使用 `/tmp/.session_status`、`/tmp/.pr_status`、`/tmp/pr-monitor-state` 等全局共享文件。
 
 ### 评论类型

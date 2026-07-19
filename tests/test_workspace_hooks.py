@@ -33,13 +33,13 @@ def init_repo(path: Path) -> None:
     subprocess.run(["git", "switch", "-qc", "feature/hooks"], cwd=path, check=True)
 
 
-def hook_input(session_id: str, cwd: Path, event: str) -> dict:
+def hook_input(session_id: str, cwd: Path, event: str, **extra: object) -> dict:
     return {
         "session_id": session_id,
         "cwd": str(cwd),
         "hook_event_name": event,
         "stop_hook_active": False,
-    }
+    } | extra
 
 
 def test_agent_hook_configs_use_supported_stop_delivery() -> None:
@@ -262,6 +262,53 @@ def test_monitor_requires_branch_local_pr_state_before_gh(tmp_path: Path) -> Non
     assert not call_log.exists()
 
 
+def test_old_monitor_exits_when_a_newer_stop_generation_exists(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 43,
+                "url": "https://github.com/example/repo/pull/43",
+            }
+        )
+    )
+
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "claude",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    old_stop = hook_input("generation-session", repo, "Stop", last_assistant_message="old turn")
+    new_stop = hook_input("generation-session", repo, "Stop", last_assistant_message="new turn")
+    run_hook("record_session_status.sh", old_stop, cwd=repo, env=env)
+    run_hook("record_session_status.sh", new_stop, cwd=repo, env=env)
+
+    result = run_hook("monitor_pr.sh", old_stop, cwd=repo, env=env)
+    assert result.stdout == ""
+    assert not call_log.exists()
+
+
 def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
@@ -342,3 +389,193 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     assert stdout == ""
     assert stderr == ""
     assert len(call_log.read_text().splitlines()) == 3
+
+
+def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 44,
+                "url": "https://github.com/example/repo/pull/44",
+            }
+        )
+    )
+    comments = [
+        {
+            "id": comment_id,
+            "in_reply_to_id": None,
+            "path": "tracked.txt",
+            "line": comment_id,
+            "body": f"review comment {comment_id}",
+            "user": {"login": f"reviewer-{comment_id}"},
+        }
+        for comment_id in range(1, 6)
+    ]
+    comments.append(
+        {
+            "id": 100,
+            "in_reply_to_id": 1,
+            "path": "tracked.txt",
+            "line": 1,
+            "body": "late reply to review comment 1",
+            "user": {"login": "reviewer-100"},
+        }
+    )
+    review_output = "".join(f"printf '%s\\n' '{json.dumps(comment)}'\n" for comment in comments)
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
+        "  printf '%s\\n' '{\"number\":44,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/44\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/issues/'* ]]; then exit 0; fi\n"
+        "if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/pulls/'* ]]; then\n"
+        f"{review_output}"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    stop = hook_input("review-batch-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    first = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
+    first_reason = json.loads(first.stdout)["reason"]
+    monitor_state = Path(f"{status_file}.monitor-state.json")
+    assert "comment_id: 2" in first_reason
+    assert "comment_id: 3" in first_reason
+    assert "comment_id: 4" in first_reason
+    assert "comment_id: 5" not in first_reason
+    assert "comment_id: 100" not in first_reason
+    assert json.loads(monitor_state.read_text())["last_review_comment_id"] == 4
+
+    second = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
+    second_reason = json.loads(second.stdout)["reason"]
+    assert "comment_id: 5" in second_reason
+    assert "comment_id: 100" in second_reason
+    assert json.loads(monitor_state.read_text())["last_review_comment_id"] == 100
+
+
+def test_branch_lease_hands_polling_to_another_stopped_session(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 45,
+                "url": "https://github.com/example/repo/pull/45",
+            }
+        )
+    )
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s:%s\\n' \"$CODEMATE_TEST_CALLER\" \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
+        "  printf '%s\\n' '{\"number\":45,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/45\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    base_env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    base_env.pop("CODEMATE_NO_PR", None)
+    stop_a = hook_input("lease-session-a", repo, "Stop")
+    stop_b = hook_input("lease-session-b", repo, "Stop")
+    env_a = base_env | {"CODEMATE_TEST_CALLER": "a"}
+    env_b = base_env | {"CODEMATE_TEST_CALLER": "b"}
+    run_hook("record_session_status.sh", stop_a, cwd=repo, env=env_a)
+    run_hook("record_session_status.sh", stop_b, cwd=repo, env=env_b)
+
+    def start_monitor(payload: dict, env: dict[str, str]) -> subprocess.Popen[str]:
+        process = subprocess.Popen(
+            [str(HOOKS / "monitor_pr.sh")],
+            cwd=repo,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert process.stdin is not None
+        process.stdin.write(json.dumps(payload))
+        process.stdin.close()
+        process.stdin = None
+        return process
+
+    processes: list[subprocess.Popen[str]] = []
+    try:
+        process_a = start_monitor(stop_a, env_a)
+        processes.append(process_a)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("first lease owner did not poll immediately")
+
+        process_b = start_monitor(stop_b, env_b)
+        processes.append(process_b)
+        time.sleep(0.3)
+        assert all(line.startswith("a:") for line in call_log.read_text().splitlines())
+
+        run_hook("record_session_status.sh", hook_input("lease-session-a", repo, "UserPromptSubmit"), cwd=repo, env=env_a)
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            if len(call_log.read_text().splitlines()) == 6:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("branch lease was not handed to the stopped session")
+
+        run_hook("record_session_status.sh", hook_input("lease-session-b", repo, "UserPromptSubmit"), cwd=repo, env=env_b)
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=3)
+            assert process.returncode == 0
+            assert stdout == ""
+            assert stderr == ""
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=3)
+
+    callers = [line.split(":", 1)[0] for line in call_log.read_text().splitlines()]
+    assert callers == ["a", "a", "a", "b", "b", "b"]

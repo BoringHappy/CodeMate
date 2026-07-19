@@ -10,11 +10,12 @@ source "$SCRIPT_DIR/hook_common.sh"
 
 HOOK_INPUT=$(cat)
 SESSION_DIR=$(codemate_session_dir "$HOOK_INPUT") || exit 0
+EVENT_FINGERPRINT=$(codemate_event_fingerprint "$HOOK_INPUT") || exit 0
 WORKSPACE_DIR=$(codemate_workspace_dir "$HOOK_INPUT") || exit 0
 
 # Exit if SLACK_WEBHOOK is not set
 [ -z "${SLACK_WEBHOOK:-}" ] && exit 0
-codemate_session_is_stopped "$SESSION_DIR" || exit 0
+codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0
 
 # Check if there are new commits since session start
 COMMIT_FILE="$WORKSPACE_DIR/slack-last-commit"
@@ -33,7 +34,7 @@ fi
 
 # Get PR info only when branch-local state says an open PR exists.
 PR_INFO=""
-if codemate_load_pr_reference && codemate_session_is_stopped "$SESSION_DIR"; then
+if codemate_load_pr_reference && codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT"; then
     PR_INFO=$(gh pr view "$CODEMATE_CURRENT_PR_NUMBER" --json number,title,url 2>/dev/null || true)
 fi
 if [ -n "$PR_INFO" ]; then
@@ -82,7 +83,7 @@ PAYLOAD=$(jq -n \
   }')
 
 # Send to Slack webhook
-codemate_session_is_stopped "$SESSION_DIR" || exit 0
+codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0
 curl -s --max-time 10 -X POST -H 'Content-type: application/json' \
     --data "$PAYLOAD" \
     "$SLACK_WEBHOOK" > /dev/null 2>&1

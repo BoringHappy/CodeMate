@@ -409,8 +409,8 @@ The hook verifies that its own session is still stopped and that the current wor
 
 ### State Isolation
 
-- Session status is keyed by runtime instance, agent, and `session_id`; monitor cursors, notification commit baselines, and retry counters are partitioned again by Git worktree and branch.
-- PR existence and lifecycle state are stored under `<absolute-git-dir>/codemate/pr-status/<branch>.json`, isolating repositories, worktrees, and branches.
+- Session status is keyed by runtime instance, agent, and `session_id`; notification commit baselines and retry counters are partitioned again by Git worktree and branch.
+- PR lifecycle state is stored at `<absolute-git-dir>/codemate/pr-status/<branch>.json`; adjacent monitor-state and lock files hold shared cursors and an interruptible branch lease, so only one stopped session handles a given PR event.
 - Fixed shared files such as `/tmp/.session_status`, `/tmp/.pr_status`, and `/tmp/pr-monitor-state` are not used.
 
 ### What Gets Monitored
