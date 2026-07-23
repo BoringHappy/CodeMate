@@ -73,9 +73,19 @@ pipx install git+https://github.com/BoringHappy/CodeMate.git
 ```bash
 # 一次性全局设置
 codemate --setup
+
+# 诊断本地环境与配置，不启动容器
+codemate --doctor
+
+# 预检一次具体启动
+codemate --doctor --branch feature/your-branch --agent codex
 ```
 
 `codemate` 命令由 `src/` 中的 Python CLI 包提供。
+
+`--doctor` 会检查全局与项目配置、必需命令、Docker daemon、所选 agent
+和目标、仓库、GitHub 认证、Git 身份以及访问 allowlist。它会一次报告
+所有发现的问题；做通用健康检查时无需指定 target。
 
 ### 使用方法
 

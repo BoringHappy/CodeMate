@@ -75,9 +75,20 @@ Then run the one-time global setup:
 ```bash
 # One-time global setup
 codemate --setup
+
+# Diagnose local setup and configuration without starting a container
+codemate --doctor
+
+# Preflight a specific launch
+codemate --doctor --branch feature/your-branch --agent codex
 ```
 
 The `codemate` command is provided by the Python CLI package in `src/`.
+
+`--doctor` checks the global and project configuration, required executables,
+Docker daemon, selected agent and target, repository, GitHub authentication,
+Git identity, and access allowlist. It reports all detected problems in one
+pass; a target is optional for a general health check.
 
 ### Usage
 

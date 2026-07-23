@@ -50,6 +50,14 @@ class ResolvedValue:
     field: Optional[Field] = None
 
 
+@dataclass(frozen=True)
+class DoctorCheck:
+    name: str
+    status: str
+    detail: str
+    fix: str = ""
+
+
 def run_capture(args: Sequence[str]) -> str:
     try:
         return subprocess.run(args, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.strip()
@@ -383,6 +391,177 @@ def check_prerequisites(config: Mapping[str, ResolvedValue]) -> None:
         raise SystemExit("Docker is not running or not accessible.")
 
 
+def doctor_checks(
+    config: Mapping[str, ResolvedValue],
+    cwd: Path,
+) -> List[DoctorCheck]:
+    checks: List[DoctorCheck] = []
+    config_dir = Path.home() / ".codemate"
+    global_config_ready = (
+        (config_dir / ".claude").is_dir()
+        and (config_dir / ".claude.json").exists()
+    )
+    checks.append(
+        DoctorCheck(
+            "Global config",
+            "pass" if global_config_ready else "fail",
+            str(config_dir) if global_config_ready else "not initialized",
+            "" if global_config_ready else "Run: codemate --setup",
+        )
+    )
+
+    project_env = cwd / ".env"
+    checks.append(
+        DoctorCheck(
+            "Project config",
+            "pass" if project_env.exists() else "warn",
+            str(project_env) if project_env.exists() else "no .env file; environment and CLI values still work",
+            "" if project_env.exists() else "Optional: run codemate --setup in this repository",
+        )
+    )
+
+    executable_status: Dict[str, bool] = {}
+    for executable in ("docker", "git", "gh"):
+        executable_path = shutil.which(executable)
+        executable_status[executable] = executable_path is not None
+        checks.append(
+            DoctorCheck(
+                executable,
+                "pass" if executable_path else "fail",
+                executable_path or "not found on PATH",
+                "" if executable_path else f"Install {executable} and ensure it is on PATH",
+            )
+        )
+
+    if executable_status["docker"]:
+        docker_info = subprocess.run(
+            ["docker", "info"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        checks.append(
+            DoctorCheck(
+                "Docker daemon",
+                "pass" if docker_info.returncode == 0 else "fail",
+                "accessible" if docker_info.returncode == 0 else "not running or not accessible",
+                "" if docker_info.returncode == 0 else "Start Docker and verify: docker info",
+            )
+        )
+
+    agent = value(config, "CODEMATE_AGENT")
+    checks.append(
+        DoctorCheck(
+            "Agent",
+            "pass" if agent in {"claude", "codex"} else "fail",
+            agent or "not set",
+            "" if agent in {"claude", "codex"} else "Use --agent claude or --agent codex",
+        )
+    )
+
+    targets = [
+        label
+        for label, key in (
+            ("branch " + value(config, "CODEMATE_BRANCH_NAME"), "CODEMATE_BRANCH_NAME"),
+            ("PR #" + value(config, "CODEMATE_PR_NUMBER"), "CODEMATE_PR_NUMBER"),
+            ("issue #" + value(config, "CODEMATE_ISSUE_NUMBER"), "CODEMATE_ISSUE_NUMBER"),
+        )
+        if value(config, key)
+    ]
+    target_status = "pass" if len(targets) == 1 else ("warn" if not targets else "fail")
+    target_detail = targets[0] if len(targets) == 1 else (
+        "not supplied (general health check)" if not targets else "multiple targets: " + ", ".join(targets)
+    )
+    checks.append(
+        DoctorCheck(
+            "Target",
+            target_status,
+            target_detail,
+            "" if len(targets) <= 1 else "Specify only one of --branch, --pr, or --issue",
+        )
+    )
+
+    repo = value(config, "CODEMATE_GIT_REPO_URL")
+    checks.append(
+        DoctorCheck(
+            "Repository",
+            "pass" if repo else "fail",
+            (
+                f"{repo_name(repo)} (via {config['CODEMATE_GIT_REPO_URL'].source})"
+                if repo
+                else "not resolved"
+            ),
+            "" if repo else "Use --repo, set CODEMATE_GIT_REPO_URL, or add a git origin",
+        )
+    )
+
+    token = value(config, "CODEMATE_GITHUB_TOKEN")
+    checks.append(
+        DoctorCheck(
+            "GitHub auth",
+            "pass" if token else "fail",
+            f"configured via {config['CODEMATE_GITHUB_TOKEN'].source}" if token else "no token resolved",
+            "" if token else "Run: gh auth login, or set CODEMATE_GITHUB_TOKEN",
+        )
+    )
+
+    git_name = value(config, "CODEMATE_GIT_USER_NAME")
+    git_email = value(config, "CODEMATE_GIT_USER_EMAIL")
+    identity_ready = bool(git_name and git_email)
+    checks.append(
+        DoctorCheck(
+            "Git identity",
+            "pass" if identity_ready else "fail",
+            f"{git_name} <{git_email}>" if identity_ready else "name or email is missing",
+            "" if identity_ready else "Configure git user.name and git user.email",
+        )
+    )
+
+    allow_country = value(config, "CODEMATE_ALLOW_COUNTRY")
+    allow_ip = value(config, "CODEMATE_ALLOW_IP")
+    allowlist_ready = bool(allow_country or allow_ip)
+    checks.append(
+        DoctorCheck(
+            "Access allowlist",
+            "pass" if allowlist_ready else "fail",
+            "IP allowlist" if allow_ip else ("country allowlist" if allow_country else "not configured"),
+            "" if allowlist_ready else "Set CODEMATE_ALLOW_IP or CODEMATE_ALLOW_COUNTRY",
+        )
+    )
+
+    return checks
+
+
+def print_doctor_report(checks: Sequence[DoctorCheck]) -> None:
+    status_style = {"pass": "green", "warn": "yellow", "fail": "red"}
+    status_label = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
+    table = Table(title="CodeMate Doctor", box=None, padding=(0, 1))
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Check", style="cyan", no_wrap=True)
+    table.add_column("Details")
+    table.add_column("Suggested fix")
+    for check in checks:
+        table.add_row(
+            f"[{status_style[check.status]}]{status_label[check.status]}[/]",
+            check.name,
+            check.detail,
+            check.fix,
+        )
+    console.print(table, crop=False)
+
+
+def run_doctor(config: Mapping[str, ResolvedValue], cwd: Path) -> None:
+    checks = doctor_checks(config, cwd)
+    print_doctor_report(checks)
+    failures = sum(check.status == "fail" for check in checks)
+    warnings = sum(check.status == "warn" for check in checks)
+    if failures:
+        raise SystemExit(f"Doctor found {failures} failure(s) and {warnings} warning(s).")
+    typer.secho(
+        f"+ Doctor found no failures ({warnings} warning(s)).",
+        fg=typer.colors.GREEN,
+    )
+
+
 def build_image(dockerfile: str, tag: str) -> None:
     dockerfile_path = Path(dockerfile)
     if not dockerfile_path.exists():
@@ -517,9 +696,14 @@ def run_codemate(args: SimpleNamespace) -> None:
         print("Installed with uv tool. Update with: uv tool upgrade codemate-cli")
         return
 
-    ensure_global_config()
     config = resolve_config(args, cwd)
     chat_defaults(config)
+
+    if getattr(args, "doctor", False):
+        run_doctor(config, cwd)
+        return
+
+    ensure_global_config()
 
     if args.build:
         tag = args.tag or "codemate:local"
@@ -557,6 +741,7 @@ def run_codemate(args: SimpleNamespace) -> None:
 def cli(
     setup: bool = typer.Option(False, "--setup", help="Create configuration files."),
     update: bool = typer.Option(False, "--update", help="Show update instructions."),
+    doctor: bool = typer.Option(False, "--doctor", help="Check local setup and resolved launch configuration."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Branch name to work on."),
     pr: Optional[str] = typer.Option(None, "--pr", help="Existing PR number to work on."),
     pr_title: Optional[str] = typer.Option(None, "--pr-title", help="PR title."),
@@ -583,6 +768,7 @@ def cli(
     args = SimpleNamespace(
         setup=setup,
         update=update,
+        doctor=doctor,
         branch=branch,
         pr=pr,
         pr_title=pr_title,
