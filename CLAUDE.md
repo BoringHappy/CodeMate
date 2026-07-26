@@ -44,10 +44,10 @@ Note: All setup scripts live under `docker/setup/` in the repository, but are co
 
 ### Required Environment Variables
 
-- `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`).
+- `CODEMATE_ALLOW_COUNTRY` — comma-separated two-letter country codes (e.g. `US,CA`).
 - `CODEMATE_ALLOW_IP` — comma-separated exact IPs or IPv4 CIDR ranges (e.g. `203.0.113.7,198.51.100.0/24`).
 
-At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set; the CLI refuses to start the container otherwise. The container enforces the check at startup using a single ip-api.com response for the detected IP, country, region, and timezone. `CODEMATE_ALLOW_IP` takes precedence when both allowlists are configured; `CODEMATE_ALLOW_COUNTRY` is consulted solely when `CODEMATE_ALLOW_IP` is unset. The returned timezone must match `TZ`; a mismatch files a GitHub issue and stops startup.
+At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set; the CLI refuses to start the container otherwise. Two startup checks validate the configured restriction independently using ip-api.com and Cloudflare's HTTPS `/cdn-cgi/trace` endpoint. The Cloudflare check reads the public IP, country (`loc`), and serving data center (`colo`); a colo-to-IANA-timezone map is generated during the image build. `CODEMATE_ALLOW_IP` takes precedence when both allowlists are configured, and the detected or mapped timezone must match `TZ`. A mismatch in either check files a GitHub issue and stops startup.
 
 ### Plugin Marketplace
 
