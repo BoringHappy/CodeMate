@@ -6,7 +6,7 @@ from types import ModuleType
 
 ROOT = Path(__file__).parents[1]
 BUILDER = ROOT / "docker/setup/python/build-colo-timezones.py"
-CHECK_REGION = ROOT / "docker/setup/shell/check-region-cloudflare.sh"
+CHECK_REGION = ROOT / "docker/setup/shell/check-region.sh"
 
 
 def load_builder() -> ModuleType:

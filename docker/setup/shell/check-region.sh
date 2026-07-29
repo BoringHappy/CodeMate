@@ -5,11 +5,13 @@ source "$(dirname "$0")/common.sh"
 
 ALLOW_COUNTRY="${CODEMATE_ALLOW_COUNTRY:-}"
 ALLOW_IP="${CODEMATE_ALLOW_IP:-}"
+COLO_TIMEZONE_MAP="${CODEMATE_COLO_TIMEZONE_MAP:-/usr/local/share/codemate/colo-timezones.tsv}"
+TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 
 if [ -z "$ALLOW_COUNTRY" ] && [ -z "$ALLOW_IP" ]; then
     printf "${RED}Neither CODEMATE_ALLOW_COUNTRY nor CODEMATE_ALLOW_IP is set. Refusing to start.${RESET}\n"
     printf "${RED}Set at least one of:${RESET}\n"
-    printf "${RED}  - CODEMATE_ALLOW_COUNTRY (comma-separated ip-api.com 'countryCode' values, e.g. US,CA)${RESET}\n"
+    printf "${RED}  - CODEMATE_ALLOW_COUNTRY (comma-separated Cloudflare 'loc' values, e.g. US,CA)${RESET}\n"
     printf "${RED}  - CODEMATE_ALLOW_IP (comma-separated IPs or IPv4 CIDR ranges, e.g. 203.0.113.7,198.51.100.0/24)${RESET}\n"
     exit 1
 fi
@@ -72,20 +74,43 @@ curl_retry() {
 
 printf "${CYAN}Checking access against CODEMATE_ALLOW_IP='${ALLOW_IP}' / CODEMATE_ALLOW_COUNTRY='${ALLOW_COUNTRY}'...${RESET}\n"
 
-# A single ip-api.com response supplies the IP, country, region, and timezone.
+# A single Cloudflare trace response supplies the IP, country (loc), and colo.
+# The image-baked colo map supplies the IANA timezone without a second API call.
 # CODEMATE_ALLOW_IP still takes precedence when both allowlists are configured.
 ip_matched=false
 country_matched=false
-RESPONSE=$(curl_retry http://ip-api.com/json/ || true)
-CURRENT_COUNTRY_CODE=$(echo "$RESPONSE" | jq -r '.countryCode // empty' 2>/dev/null)
-CURRENT_COUNTRY=$(echo "$RESPONSE" | jq -r '.country // empty' 2>/dev/null)
-CURRENT_REGION=$(echo "$RESPONSE" | jq -r '.region // empty' 2>/dev/null)
-CURRENT_QUERY_IP=$(echo "$RESPONSE" | jq -r '.query // empty' 2>/dev/null)
-CURRENT_TIMEZONE=$(echo "$RESPONSE" | jq -r '.timezone // empty' 2>/dev/null)
+RESPONSE=$(curl_retry "$TRACE_URL" || true)
 
-if [ -z "$CURRENT_QUERY_IP" ]; then
-    printf "${RED}Could not detect IP (ip-api.com).${RESET}\n"
-    printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
+trace_value() {
+    local key="$1"
+    local name value
+    while IFS='=' read -r name value; do
+        if [ "$name" = "$key" ]; then
+            printf '%s' "${value%$'\r'}"
+            return 0
+        fi
+    done <<< "$RESPONSE"
+    return 1
+}
+
+CURRENT_COLO=$(trace_value colo || true)
+CURRENT_COUNTRY_CODE=$(trace_value loc || true)
+CURRENT_QUERY_IP=$(trace_value ip || true)
+
+if [ -z "$CURRENT_COLO" ] || [ -z "$CURRENT_COUNTRY_CODE" ] || [ -z "$CURRENT_QUERY_IP" ]; then
+    printf "${RED}Could not detect colo, loc, and ip (Cloudflare trace).${RESET}\n"
+    printf "${RED}Cloudflare trace response: ${RESPONSE}${RESET}\n"
+    exit 1
+fi
+
+if [ ! -r "$COLO_TIMEZONE_MAP" ]; then
+    printf "${RED}Cloudflare colo timezone map is missing: ${COLO_TIMEZONE_MAP}${RESET}\n"
+    exit 1
+fi
+
+CURRENT_TIMEZONE=$(awk -v colo="$CURRENT_COLO" '$1 == colo { print $2; exit }' "$COLO_TIMEZONE_MAP")
+if [ -z "$CURRENT_TIMEZONE" ]; then
+    printf "${RED}Could not map Cloudflare colo '${CURRENT_COLO}' to a timezone.${RESET}\n"
     exit 1
 fi
 
@@ -100,12 +125,6 @@ if [ -n "$ALLOW_IP" ]; then
         fi
     done
 else
-    if [ -z "$CURRENT_COUNTRY_CODE" ]; then
-        printf "${RED}Could not detect country code (ip-api.com).${RESET}\n"
-        printf "${RED}ip-api response: ${RESPONSE}${RESET}\n"
-        exit 1
-    fi
-
     IFS=',' read -ra ALLOWED_LIST <<< "$ALLOW_COUNTRY"
     for allowed in "${ALLOWED_LIST[@]}"; do
         trimmed="$(echo "$allowed" | xargs)"
@@ -125,32 +144,34 @@ if { [ "$ip_matched" = true ] || [ "$country_matched" = true ]; } && [ "$timezon
     if [ "$ip_matched" = true ]; then
         matched_by="IP '${CURRENT_QUERY_IP}'"
     else
-        matched_by="country '${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY})"
+        matched_by="country '${CURRENT_COUNTRY_CODE}'"
     fi
-    printf "${GREEN}✓ Access check passed: matched by ${matched_by} (country=${CURRENT_COUNTRY_CODE}, region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP})${RESET}\n"
+    printf "${GREEN}✓ Access check passed: matched by ${matched_by} (colo=${CURRENT_COLO}, country=${CURRENT_COUNTRY_CODE}, ip=${CURRENT_QUERY_IP}, timezone=${CURRENT_TIMEZONE})${RESET}\n"
     exit 0
 fi
 
 # Only one allowlist is consulted per run (IP takes precedence over country),
 # so report against whichever check was actually in effect.
 if [ "$timezone_mismatched" = true ]; then
-    printf "${RED}✗ Timezone mismatch: ip-api.com detected timezone='${CURRENT_TIMEZONE}', but TZ='${TZ}'${RESET}\n"
+    printf "${RED}✗ Timezone mismatch: Cloudflare colo '${CURRENT_COLO}' maps to timezone='${CURRENT_TIMEZONE}', but TZ='${TZ}'${RESET}\n"
 
     ISSUE_TITLE="CodeMate timezone check failed: ${CURRENT_TIMEZONE} does not match ${TZ}"
     ISSUE_BODY=$(cat <<EOF
-CodeMate refused to start because the timezone detected by ip-api.com does not
-match the container's configured \`TZ\` value.
+CodeMate refused to start because the timezone mapped from the Cloudflare colo
+does not match the container's configured \`TZ\` value.
 
 | Field | Value |
 | --- | --- |
-| Detected timezone (ip-api.com) | \`${CURRENT_TIMEZONE}\` |
+| Cloudflare colo | \`${CURRENT_COLO}\` |
+| Colo timezone | \`${CURRENT_TIMEZONE}\` |
 | Configured timezone (TZ) | \`${TZ}\` |
-| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
+| Detected country code (Cloudflare loc) | \`${CURRENT_COUNTRY_CODE}\` |
+| Detected IP (Cloudflare trace) | \`${CURRENT_QUERY_IP}\` |
 | Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
 
-ip-api.com response:
+Cloudflare trace response:
 
-\`\`\`json
+\`\`\`text
 ${RESPONSE}
 \`\`\`
 EOF
@@ -160,43 +181,45 @@ elif [ -n "$ALLOW_IP" ]; then
 
     ISSUE_TITLE="CodeMate access check failed: IP ${CURRENT_QUERY_IP} not allowed"
     ISSUE_BODY=$(cat <<EOF
-CodeMate refused to start Claude because the container's detected IP does not
+CodeMate refused to start because the container's detected IP does not
 match \`CODEMATE_ALLOW_IP\`. (\`CODEMATE_ALLOW_IP\` takes precedence; the
 \`CODEMATE_ALLOW_COUNTRY\` allowlist is only consulted when \`CODEMATE_ALLOW_IP\` is unset.)
 
 | Field | Value |
 | --- | --- |
-| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
+| Detected IP (Cloudflare trace) | \`${CURRENT_QUERY_IP}\` |
+| Cloudflare colo | \`${CURRENT_COLO}\` |
+| Detected country code (Cloudflare loc) | \`${CURRENT_COUNTRY_CODE}\` |
 | Allowed IP(s) | \`${ALLOW_IP}\` |
 | Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
 
-ip-api.com response:
+Cloudflare trace response:
 
-\`\`\`json
+\`\`\`text
 ${RESPONSE}
 \`\`\`
 EOF
 )
 else
-    printf "${RED}✗ Access mismatch: detected country='${CURRENT_COUNTRY_CODE}' (${CURRENT_COUNTRY}, region=${CURRENT_REGION}, ip=${CURRENT_QUERY_IP}) is not in the country allowlist '${ALLOW_COUNTRY}'${RESET}\n"
+    printf "${RED}✗ Access mismatch: detected country='${CURRENT_COUNTRY_CODE}' (colo=${CURRENT_COLO}, ip=${CURRENT_QUERY_IP}) is not in the country allowlist '${ALLOW_COUNTRY}'${RESET}\n"
 
     ISSUE_TITLE="CodeMate access check failed: country ${CURRENT_COUNTRY_CODE} not allowed"
     ISSUE_BODY=$(cat <<EOF
-CodeMate refused to start Claude because the container's detected country does
+CodeMate refused to start because the container's detected country does
 not match \`CODEMATE_ALLOW_COUNTRY\`. (No \`CODEMATE_ALLOW_IP\` allowlist was configured.)
 
 | Field | Value |
 | --- | --- |
-| Detected country code | \`${CURRENT_COUNTRY_CODE}\` |
-| Detected country | \`${CURRENT_COUNTRY}\` |
-| Detected region | \`${CURRENT_REGION}\` |
-| Detected IP (ip-api.com) | \`${CURRENT_QUERY_IP}\` |
+| Detected country code (Cloudflare loc) | \`${CURRENT_COUNTRY_CODE}\` |
+| Cloudflare colo | \`${CURRENT_COLO}\` |
+| Colo timezone | \`${CURRENT_TIMEZONE}\` |
+| Detected IP (Cloudflare trace) | \`${CURRENT_QUERY_IP}\` |
 | Allowed country code(s) | \`${ALLOW_COUNTRY}\` |
 | Branch | \`${CODEMATE_BRANCH_NAME:-unknown}\` |
 
-ip-api.com response:
+Cloudflare trace response:
 
-\`\`\`json
+\`\`\`text
 ${RESPONSE}
 \`\`\`
 EOF
