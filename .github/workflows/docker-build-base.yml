@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - 'docker/Dockerfile.base'
+      - 'docker/setup/python/build-colo-timezones.py'
   workflow_dispatch:
 
 concurrency:

@@ -9,11 +9,6 @@ USER root
 # Copy setup scripts as root (755 allows agent user to read/execute)
 COPY --chmod=755 setup /usr/local/bin/setup
 
-# Cloudflare's trace endpoint identifies the serving colo but does not include
-# a timezone. Resolve that colo locally at startup using a map generated once
-# during the image build.
-RUN python3 /usr/local/bin/setup/python/build-colo-timezones.py
-
 # Install tmux configuration for the agent user.
 # Enables mouse scroll, focus events, and Kitty Keyboard Protocol passthrough
 # so Shift+Enter and similar modified keys work in Claude Code from any

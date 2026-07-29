@@ -27,6 +27,7 @@ jobs:
           filters: |
             base:
               - 'docker/Dockerfile.base'
+              - 'docker/setup/python/build-colo-timezones.py'
               - '.github/workflows/docker-build-base-check.yml'
 
       - name: Skip — no Dockerfile.base changes
@@ -56,6 +57,7 @@ jobs:
         run: |
           set -euxo pipefail
           docker run --rm codemate-base:pr-check bash -euxc '
+            test -s /usr/local/share/codemate/colo-timezones.tsv
             kubectl version --client --output=yaml
             helm version --short
           '

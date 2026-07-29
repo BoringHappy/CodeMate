@@ -71,6 +71,11 @@ RUN set -euxo pipefail \
     && chsh -s $(which zsh) agent \
     && npm cache clean --force
 
+# Cloudflare's trace endpoint identifies the serving colo but does not include
+# a timezone. Generate the local lookup once in the base image.
+COPY --chmod=755 setup/python/build-colo-timezones.py /usr/local/bin/setup/python/build-colo-timezones.py
+RUN python3 /usr/local/bin/setup/python/build-colo-timezones.py
+
 # Install kubectl and helm (multi-arch: amd64/arm64) - latest stable versions
 RUN set -euxo pipefail \
     && ARCH=$(dpkg --print-architecture) \
