@@ -30,7 +30,7 @@ CodeMate 通过在隔离的 Docker 容器中运行 Claude Code 来解决这个�
 - GitHub CLI (`gh`) 已认证
 - Anthropic API key
 
-运行 `codemate --setup` 创建所需的配置文件（全局配置在 `~/.codemate/`，项目 `.env`）
+运行 `codemate --setup` 创建所需的配置文件（全局配置在 `CODEMATE_HOME`，默认 `~/.codemate/`，项目 `.env`）
 
 #### Mac 用户
 
@@ -130,12 +130,12 @@ codemate --branch feature/xyz --tz Asia/Shanghai
 ```
 
 设置命令将：
-1. 在 `~/.codemate/` 创建全局配置（Claude 配置和设置）
+1. 在 `CODEMATE_HOME` 创建全局配置（默认 `~/.codemate/`；Claude 配置和设置）
 2. 在当前目录创建项目特定的 `.env` 文件
 3. 提示你输入 Anthropic API token 和其他设置
 
 **配置结构：**
-- **全局配置**：`~/.codemate/` - 共享 home 状态；其中每个顶层文件或目录都会用相同名称挂载到 `$HOME`
+- **全局配置**：`CODEMATE_HOME`（默认 `~/.codemate/`）- 共享 home 状态；其中每个顶层文件或目录都会用相同名称挂载到 `$HOME`。可通过 `CODEMATE_HOME` 环境变量覆盖位置（例如 `export CODEMATE_HOME=/data/codemate`），将其存放在任意磁盘路径，而不绑定 `~/.codemate`
 - **项目配置**：每个项目目录中的 `.env` - 项目特定的密钥和设置
 
 **仓库 URL 解析**：CLI 按以下优先级确定仓库 URL：
@@ -267,6 +267,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_GIT_USER_EMAIL` | 自动 | Git commit author 邮箱（如果未提供，默认为 `git config user.email`） |
 | `CODEMATE_CO_AUTHOR_BY` | 否 | Git commit skill 使用的 commit co-author，例如 `Name <email@example.com>` 或 `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
+| `CODEMATE_HOME` | 否 | 宿主机上的 CodeMate home 目录；支持 `~` 和 `$VAR` 展开（默认：`~/.codemate`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
 | `CODEMATE_NO_PR` | 否 | 跳过 PR 创建和 branch push |
 | `CODEMATE_CHAT` | 否 | Chat 模式；会推导出 `CODEMATE_NO_PR=true` 并跳过 CodeMate system prompt 注入 |

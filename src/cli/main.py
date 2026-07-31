@@ -61,6 +61,16 @@ def run_checked(args: Sequence[str]) -> None:
     subprocess.run(args, check=True)
 
 
+def codemate_home() -> Path:
+    """Resolve the CodeMate home directory, overridable via CODEMATE_HOME.
+
+    Defaults to ~/.codemate; CODEMATE_HOME may point anywhere (absolute path,
+    ~ expansion, or $VAR references are all supported).
+    """
+    raw = os.environ.get("CODEMATE_HOME") or str(Path.home() / ".codemate")
+    return Path(os.path.expanduser(os.path.expandvars(raw)))
+
+
 def git_remote() -> str:
     return run_capture(["git", "config", "--get", "remote.origin.url"])
 
@@ -355,6 +365,7 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_column("Value", min_width=inline_width)
     table.add_row("Target", target_label(config))
     table.add_row("Agent", value(config, "CODEMATE_AGENT"))
+    table.add_row("Home dir", str(codemate_home()))
     if value(config, "CODEMATE_CHAT"):
         table.add_row("Chat mode", "enabled")
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
@@ -392,7 +403,7 @@ def build_image(dockerfile: str, tag: str) -> None:
 
 
 def create_setup_files(cwd: Path) -> None:
-    config_dir = Path.home() / ".codemate"
+    config_dir = codemate_home()
     claude_dir = config_dir / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / ".claude.json").write_text("{}\n") if not (config_dir / ".claude.json").exists() else None
@@ -429,7 +440,7 @@ def create_setup_files(cwd: Path) -> None:
 
 
 def ensure_global_config() -> None:
-    config_dir = Path.home() / ".codemate"
+    config_dir = codemate_home()
     if not (config_dir / ".claude").is_dir() or not (config_dir / ".claude.json").exists():
         raise SystemExit("CodeMate configuration not found. Run: codemate --setup")
 
@@ -472,8 +483,9 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     has_network = "--network" in docker_params or any(p.startswith("--network=") for p in docker_params)
     network_args = [] if has_network or sys.platform == "darwin" else ["--network", "host"]
 
-    volume_args = ["-v", f"{Path.home() / '.codemate'}:/home/agent/.codemate"]
-    for entry in sorted((Path.home() / ".codemate").iterdir()):
+    codemate_dir = codemate_home()
+    volume_args = ["-v", f"{codemate_dir}:/home/agent/.codemate"]
+    for entry in sorted(codemate_dir.iterdir()):
         volume_args.extend(["-v", f"{entry}:/home/agent/{entry.name}"])
     if Path("skills").is_dir():
         volume_args.extend(["-v", f"{Path.cwd() / 'skills'}:/home/agent/.claude/skills"])
