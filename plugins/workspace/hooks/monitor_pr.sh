@@ -20,6 +20,7 @@ LAST_CI_RUN_ID=""
 LAST_CI_FAILURE_SIGNATURE=""
 CONSECUTIVE_FAILURES=0
 ACTION_MESSAGE=""
+MAX_POLLS=30
 
 log_monitor() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$MONITOR_LOG_FILE"
@@ -352,8 +353,14 @@ emit_continuation() {
 }
 
 main() {
-    local pr_number poll_result delay_index=0
-    local delays=(0 10 30 60 120)
+    local pr_number poll_result delay_index=0 poll_count=0
+    local delays
+
+    if [ -n "${CODEMATE_MONITOR_DELAYS:-}" ]; then
+        IFS=',' read -r -a delays <<< "$CODEMATE_MONITOR_DELAYS"
+    else
+        delays=(0 10 30 60 120)
+    fi
 
     session_can_poll || exit 0
     codemate_load_pr_reference || exit 0
@@ -373,6 +380,7 @@ main() {
         poll_once "$pr_number"
         poll_result=$?
         save_monitor_state "$pr_number" || true
+        poll_count=$((poll_count + 1))
 
         case "$poll_result" in
             1)
@@ -391,6 +399,11 @@ main() {
                 fi
                 ;;
         esac
+
+        if [ "$poll_count" -ge "$MAX_POLLS" ]; then
+            log_monitor "Monitor poll limit reached ($MAX_POLLS polls); monitor exiting"
+            exit 0
+        fi
 
         if [ "$delay_index" -lt $((${#delays[@]} - 1)) ]; then
             delay_index=$((delay_index + 1))

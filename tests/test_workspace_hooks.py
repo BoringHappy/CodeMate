@@ -391,6 +391,58 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     assert len(call_log.read_text().splitlines()) == 3
 
 
+def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 46,
+                "url": "https://github.com/example/repo/pull/46",
+            }
+        )
+    )
+
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
+        "  printf '%s\\n' '{\"number\":46,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/46\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n"
+    )
+    fake_gh.chmod(0o755)
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_MONITOR_DELAYS": "0",
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    stop = hook_input("limit-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    result = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
+
+    assert result.stdout == ""
+    # Each poll makes 3 gh calls (pr view, issue comments, review comments).
+    assert len(call_log.read_text().splitlines()) == 30 * 3
+
+
 def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
