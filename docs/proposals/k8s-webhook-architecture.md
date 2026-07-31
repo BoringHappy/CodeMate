@@ -5,6 +5,11 @@
 **Date:** 2026-06-07
 **Branch:** `proposal-k8s-design`
 
+> **Legacy baseline note (2026-07):** The local Docker workflow has since moved PR polling into
+> the workspace plugin's native Stop hook, with per-session/per-branch state and no cron or tmux
+> prompt injection. References below to `monitor-pr.sh`, global `/tmp` state, and cron describe the
+> baseline that existed when this proposal was written and need re-baselining before implementation.
+
 ---
 
 ## 1. Motivation

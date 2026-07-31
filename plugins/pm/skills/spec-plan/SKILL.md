@@ -69,9 +69,12 @@ printf '%s' "$spec" | jq -r '.body'
 5. **Post the plan as a comment** on the spec issue:
 
    ```bash
-   printf '%s' "<plan sections>" > /tmp/spec-plan-body.md
-   COMMENT_URL=$(gh issue comment <spec_issue_number> --body-file /tmp/spec-plan-body.md)
-   rm -f /tmp/spec-plan-body.md
+   PLAN_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/codemate-spec-plan.XXXXXX")
+   trap 'rm -f "$PLAN_BODY_FILE"' EXIT
+   printf '%s' "<plan sections>" > "$PLAN_BODY_FILE"
+   COMMENT_URL=$(gh issue comment <spec_issue_number> --body-file "$PLAN_BODY_FILE")
+   rm -f "$PLAN_BODY_FILE"
+   trap - EXIT
    REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
    COMMENT_ID=$(echo "$COMMENT_URL" | grep -oE '[0-9]+$')
    gh api /repos/$REPO/issues/comments/$COMMENT_ID/reactions --method POST -f content="rocket"

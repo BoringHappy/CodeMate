@@ -7,7 +7,7 @@ Agent-specific workflow names:
 - Claude: use commands named `/pr:get-details`, `/git:commit`, `/pr:fix-comments`, and `/pr:update`.
 
 1. **When starting a conversation (user's first message):**
-   - Check whether a PR already exists by reading `/tmp/.pr_status`.
+   - Check whether a PR already exists by resolving `CURRENT_BRANCH=$(git branch --show-current)` (use `detached-$(git rev-parse --short=12 HEAD)` when empty), then reading `$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json` and confirming its JSON `state` is `open`.
    - If a PR exists (the file is present and not empty), use the PR details workflow (`pr:get-details` in Codex, `/pr:get-details` in Claude) to fetch PR context.
    - If no PR exists yet (the file is missing or empty), you are in PRE-PR phase:
      * Focus on understanding the task or issue.
@@ -34,4 +34,4 @@ Agent-specific workflow names:
    - After the PR description is current, proceed with the review request.
    - This applies only in POST-PR phase when a PR exists.
 
-In open-source workflows, PR creation is deferred until the branch is ready. Always check `/tmp/.pr_status` to determine whether you are in PRE-PR or POST-PR phase. Use the agent-specific form above, and report clearly if a required skill or command is missing.
+In open-source workflows, PR creation is deferred until the branch is ready. Always check the branch-scoped PR status under the current worktree's Git metadata to determine whether you are in PRE-PR or POST-PR phase. Use the agent-specific form above, and report clearly if a required skill or command is missing.

@@ -4,6 +4,8 @@ import subprocess
 import sys
 import shlex
 import tempfile
+import json
+from datetime import datetime, timezone
 
 
 # Color codes
@@ -180,19 +182,50 @@ def main():
     if pr_url:
         print(f"  PR URL: {BLUE}{pr_url}{RESET}")
 
-    # Write PR status to file for skills to check (using atomic write)
-    pr_status_file = "/tmp/.pr_status"
+    # Write branch-scoped PR status under this worktree's Git metadata. This is
+    # isolated across repositories, worktrees, and branches while remaining
+    # discoverable by both Claude and Codex plugin workflows.
     try:
-        # Use atomic write to prevent race conditions
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, dir='/tmp', prefix='.pr_status_') as f:
-            f.write(pr_url if pr_url else "")
+        current_branch = run("git branch --show-current").stdout.strip()
+        if not current_branch:
+            current_branch = f"detached-{run('git rev-parse --short=12 HEAD').stdout.strip()}"
+        git_dir = run("git rev-parse --absolute-git-dir").stdout.strip()
+        pr_status_file = os.path.join(
+            git_dir, "codemate", "pr-status", f"{current_branch}.json"
+        )
+        os.makedirs(os.path.dirname(pr_status_file), exist_ok=True)
+
+        resolved_pr_number = None
+        if pr_number.isdigit():
+            resolved_pr_number = int(pr_number)
+        elif pr_url:
+            url_number = pr_url.rstrip("/").rsplit("/", 1)[-1]
+            if url_number.isdigit():
+                resolved_pr_number = int(url_number)
+
+        status = {
+            "state": "open" if pr_url else "none",
+            "branch": current_branch,
+            "number": resolved_pr_number,
+            "url": pr_url if pr_url else "",
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+        # Use an atomic same-directory rename so readers never see partial JSON.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            delete=False,
+            dir=os.path.dirname(pr_status_file),
+            prefix=".pr-status.",
+        ) as f:
+            json.dump(status, f)
+            f.write("\n")
             temp_path = f.name
 
-        # Atomic rename (POSIX systems)
         os.rename(temp_path, pr_status_file)
 
         if pr_url:
-            print(f"  {GREEN}✓ PR status saved to {pr_status_file}{RESET}")
+            print(f"  {GREEN}✓ Branch PR status saved to {pr_status_file}{RESET}")
         else:
             print(f"  {YELLOW}No PR exists yet. Create one when ready.{RESET}")
     except Exception as e:

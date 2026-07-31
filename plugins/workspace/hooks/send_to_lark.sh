@@ -1,12 +1,28 @@
-#!/bin/bash
-# Claude Code Stop hook - sends notification to Lark
+#!/usr/bin/env bash
+# Stop hook helper - sends notification to Lark.
 # Requires LARK_WEBHOOK environment variable to be set
 
+set -uo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hook_common.sh
+source "$SCRIPT_DIR/hook_common.sh"
+
+HOOK_INPUT=$(cat)
+SESSION_DIR=$(codemate_session_dir "$HOOK_INPUT") || exit 0
+EVENT_FINGERPRINT=$(codemate_event_fingerprint "$HOOK_INPUT") || exit 0
+WORKSPACE_DIR=$(codemate_workspace_dir "$HOOK_INPUT") || exit 0
+
 # Exit if LARK_WEBHOOK is not set
-[ -z "$LARK_WEBHOOK" ] && exit 0
+[ -z "${LARK_WEBHOOK:-}" ] && exit 0
+codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0
 
 # Check if there are new commits since session start
-COMMIT_FILE="/tmp/.session_commit"
+COMMIT_FILE="$WORKSPACE_DIR/lark-last-commit"
+START_COMMIT_FILE="$WORKSPACE_DIR/start_commit"
+if [ ! -f "$COMMIT_FILE" ] && [ -f "$START_COMMIT_FILE" ]; then
+    cp "$START_COMMIT_FILE" "$COMMIT_FILE"
+fi
 if [ -f "$COMMIT_FILE" ]; then
     LAST_NOTIFIED_COMMIT=$(cat "$COMMIT_FILE")
     CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null)
@@ -16,8 +32,11 @@ if [ -f "$COMMIT_FILE" ]; then
     fi
 fi
 
-# Get PR info using gh CLI
-PR_INFO=$(gh pr view --json number,title,url 2>/dev/null)
+# Get PR info only when branch-local state says an open PR exists.
+PR_INFO=""
+if codemate_load_pr_reference && codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT"; then
+    PR_INFO=$(gh pr view "$CODEMATE_CURRENT_PR_NUMBER" --json number,title,url 2>/dev/null || true)
+fi
 if [ -n "$PR_INFO" ]; then
     PR_URL=$(echo "$PR_INFO" | jq -r '.url // "N/A"')
     PR_TITLE=$(echo "$PR_INFO" | jq -r '.title // "N/A"')
@@ -65,7 +84,8 @@ PAYLOAD=$(jq -n \
   }')
 
 # Send to Lark webhook
-curl -s -X POST -H 'Content-type: application/json' \
+codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0
+curl -s --max-time 10 -X POST -H 'Content-type: application/json' \
     --data "$PAYLOAD" \
     "$LARK_WEBHOOK" > /dev/null 2>&1
 

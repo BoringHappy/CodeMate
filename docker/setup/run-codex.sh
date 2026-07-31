@@ -9,7 +9,7 @@ source "$SETUP_DIR/shell/common.sh"
 # Install or refresh Codex-specific marketplaces and plugins before launch.
 run_setup_script "$SETUP_DIR/shell/setup-codex-plugins.sh" "Running setup-codex-plugins.sh..."
 
-CODEX_SESSION="codex"
+CODEX_SESSION="${CODEMATE_AGENT_SESSION:-codex-${CODEMATE_INSTANCE_ID:-default}}"
 
 printf "${GREEN}Starting CodeMate Codex with tmux...${RESET}\n"
 

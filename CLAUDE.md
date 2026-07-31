@@ -38,7 +38,7 @@ Parameters:
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
 6. `setup/setup.sh` enforces the region restriction before any other setup. `CODEMATE_ALLOW_IP` takes precedence over `CODEMATE_ALLOW_COUNTRY`; failed checks file a GitHub issue and stop startup.
-7. `setup/run.sh` starts the PR-monitor cron daemon and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`.
+7. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. PR monitoring runs from the workspace plugin's native Stop hook.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 
@@ -80,7 +80,9 @@ The marketplace is fetched from the external repository: `BoringHappy/CodeMatePl
 - `/issue:classify-issue` - Post clarifying questions for ambiguous issues and add `needs-more-info` label
 
 **Workspace Plugin** (`workspace@codemate`):
-- Session lifecycle hooks: tracks SessionStart, UserPromptSubmit, and Stop events to `/tmp/.session_status`
+- Session lifecycle hooks: tracks SessionStart, UserPromptSubmit, and Stop in instance/agent/session-scoped runtime directories, with workspace state partitioned again by worktree and branch and PR polling serialized by a branch lease
+- PR monitor: polls immediately, then after 10/30/60/120 seconds while that session remains stopped; Claude uses background `asyncRewake`, while Codex uses native synchronous Stop continuation output
+- Branch PR state: stored per worktree under `<absolute-git-dir>/codemate/pr-status/<branch>.json`
 - Slack notification on Stop: sends a message to `SLACK_WEBHOOK` when new commits are pushed (requires `SLACK_WEBHOOK` env var)
 - `/workspace:best-practice` - Bootstrap a repo with spec issue templates, labels, and PR template
 

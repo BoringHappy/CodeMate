@@ -20,7 +20,7 @@ CodeMate solves this by running Claude Code in an isolated Docker container wher
 - Persistent home configuration through `CODEMATE_HOME` (default `~/.codemate`)
 - Built-in Claude Code skills for PR workflow automation
 - Slack and Lark notifications when Claude stops (via `SLACK_WEBHOOK` / `LARK_WEBHOOK`)
-- tmux session management with PR comment monitoring
+- tmux session management with native Claude/Codex Stop-hook PR monitoring
 
 ## Quick Start
 
@@ -241,6 +241,9 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
+| `CODEMATE_AGENT_SESSION` | No | Override the tmux session name (defaults to an instance-scoped name) |
+| `CODEMATE_INSTANCE_ID` | No | Runtime instance namespace used to distinguish concurrent agent processes |
+| `CODEMATE_RUNTIME_DIR` | No | Override the root for session-scoped hook state (defaults to `$XDG_RUNTIME_DIR/codemate` or `/tmp/codemate-<uid>`) |
 | `CODEMATE_NO_PR` | No | Skip PR creation and branch push |
 | `CODEMATE_CHAT` | No | Chat mode; derives `CODEMATE_NO_PR=true` and skips CodeMate system prompt injection |
 | `TZ` | No | Container timezone (default: `UTC`; override with `--tz`, `.env`, or the ambient environment) |
@@ -270,7 +273,7 @@ On startup, the container:
 6. Installs/updates plugins for the selected agent from configured marketplaces
 7. Starts Claude Code or Codex in the matching tmux session, appending CodeMate instructions unless chat mode is enabled
 8. Sends the initial query to the selected agent if `--query` is provided
-9. Runs a cron job every minute to monitor the PR for new comments, CI failures, and review-ready state
+9. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
 
 ## Skills
 
@@ -323,9 +326,9 @@ The `--granularity` flag controls task sizing:
 | `/workspace:best-practice` | Bootstrap a repo with spec issue templates, labels, and PR template |
 
 The workspace plugin also installs session lifecycle hooks:
-- **SessionStart** — records session start time and current commit
-- **UserPromptSubmit** — records each prompt submission timestamp
-- **Stop** — checks for new commits, sends Slack/Lark notifications if `SLACK_WEBHOOK` or `LARK_WEBHOOK` is set
+- **SessionStart** — records session start time and current commit in session-scoped runtime state
+- **UserPromptSubmit** — marks that specific session active
+- **Stop** — checks for uncommitted changes, sends Slack/Lark notifications, and monitors the current branch's PR
 
 ### Custom Plugins
 
@@ -400,15 +403,23 @@ codemate --branch issue-456 --query "Please use /issue:read-issue skill to read 
 
 ## PR Comment Monitoring
 
-CodeMate automatically monitors PR comments and notifies Claude when new feedback arrives. A cron job runs every minute to check for new comments. The monitor only acts when Claude's session is idle (stopped).
+CodeMate monitors PR feedback from the workspace plugin's native `Stop` hook. The first check runs immediately; later checks back off to 10, 30, 60, and then at most 120 seconds. No cron daemon or tmux prompt injection is used. Claude runs the poller as an `asyncRewake` hook so the UI remains interactive; Codex uses its synchronous Stop continuation contract because Codex does not currently run async command hooks.
+
+The hook verifies that its own session is still stopped and that the current worktree/branch still has an open PR before every `gh` call. If a user submits a new prompt, the in-flight monitor exits. When feedback is found, Claude is awakened through `asyncRewake`; Codex receives a structured Stop continuation decision. Both paths create a native agent turn.
+
+### State Isolation
+
+- Session status is keyed by runtime instance, agent, and `session_id`; notification commit baselines and retry counters are partitioned again by Git worktree and branch.
+- PR lifecycle state is stored at `<absolute-git-dir>/codemate/pr-status/<branch>.json`; adjacent monitor-state and lock files hold shared cursors and an interruptible branch lease, so only one stopped session handles a given PR event.
+- Fixed shared files such as `/tmp/.session_status`, `/tmp/.pr_status`, and `/tmp/pr-monitor-state` are not used.
 
 ### What Gets Monitored
 
-Each cron run checks the following in priority order (only one action is taken per run):
+Each poll checks the following in priority order (only one continuation is created per poll):
 
-1. **CI failures** — if a CI check fails on the current branch, Claude is sent the failure logs and asked to fix them
-2. **PR ready for review** — when a draft PR is marked ready for review, Claude is asked to update the PR title and description via `/pr:update` (which also applies the `pr-updated` label so the PR isn't re-notified)
-3. **Issue comments** — new general PR comments (Conversation tab) without a 👀 reaction are forwarded to Claude
+1. **CI failures** — if a CI check fails on the current branch, the selected agent receives the failure logs and is asked to fix them
+2. **PR ready for review** — when a draft PR is marked ready for review, the selected agent is asked to update the PR title and description via `pr:update` (which also applies the `pr-updated` label so the PR isn't re-notified)
+3. **Issue comments** — new general PR comments (Conversation tab) without a 👀 reaction are forwarded to the selected agent
 4. **Review comments** — unresolved inline code comments (Files changed tab) trigger `/pr:fix-comments`
 
 ### Comment Types
@@ -425,28 +436,28 @@ GitHub PRs have two types of comments that CodeMate monitors:
 When someone leaves a **review comment** (inline code comment):
 
 1. Monitor detects unresolved review comments
-2. Sends message to Claude: `"Please use /fix-comments skill to address comments"`
-3. Claude uses `/pr:fix-comments` skill to:
+2. Continues the selected agent with a request to use `pr:fix-comments`
+3. The agent uses the workflow to:
    - Read the feedback
    - Make code changes
    - Commit and push
-   - Reply with "Claude Replied: ..." to mark as resolved
+   - Reply with "CodeMate Replied: ..." to mark as resolved
 
 ### Issue Comments Workflow
 
 When someone leaves an **issue comment** (general PR comment):
 
 1. Monitor detects new issue comments without 👀 reaction
-2. Sends the actual comment content to Claude
-3. Claude processes the request
-4. Claude uses `/pr:ack-comments` skill to add 👀 reaction
+2. Continues the selected agent with the actual comment content
+3. The agent processes the request
+4. The agent uses `pr:ack-comments` to add a 👀 reaction
 5. Future runs skip comments with 👀 reaction
 
 ### Filtering Logic
 
 Comments are filtered out if they:
 - Are posted by bots (login ending in `[bot]`)
-- Start with "Claude Replied:" (already handled)
+- Start with "CodeMate Replied:" (already handled)
 - Have 👀 reaction (already acknowledged)
 
 ## Best Practices

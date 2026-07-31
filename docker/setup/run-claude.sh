@@ -11,7 +11,7 @@ run_setup_script "$SETUP_DIR/python/setup-ccline.py" "Running setup-ccline.py...
 run_setup_script "$SETUP_DIR/shell/setup-claude-plugins.sh" "Running setup-claude-plugins.sh..."
 
 # Configuration
-CLAUDE_SESSION="claude-code"
+CLAUDE_SESSION="${CODEMATE_AGENT_SESSION:-claude-code-${CODEMATE_INSTANCE_ID:-default}}"
 
 printf "${GREEN}Starting CodeMate with tmux...${RESET}\n"
 
@@ -64,17 +64,11 @@ fi
 # Display session information
 printf "${YELLOW}=== CodeMate Sessions ===${RESET}\n"
 echo "Claude Code session: $CLAUDE_SESSION (tmux)"
-echo "PR Monitor: cron job (every minute)"
-echo ""
-printf "${YELLOW}=== Log Files ===${RESET}\n"
-echo "Monitor log: /tmp/pr-monitor.log"
-echo "State file: /tmp/pr-monitor-state"
+echo "PR Monitor: workspace Stop hook (10/30/60/120 second backoff)"
 echo ""
 printf "${YELLOW}=== Commands ===${RESET}\n"
-echo "View monitor log: tail -f /tmp/pr-monitor.log"
-echo "View cron jobs: crontab -l"
 echo "List tmux sessions: tmux ls"
-echo "Kill Claude: tmux kill-server"
+echo "Kill Claude: tmux kill-session -t $CLAUDE_SESSION"
 echo ""
 printf "${GREEN}Attaching to Claude Code session...${RESET}\n"
 sleep 1

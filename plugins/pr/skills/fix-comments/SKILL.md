@@ -20,11 +20,16 @@ Automatically address feedback from GitHub pull request comments.
 ## Prerequisites
 
 **Check PR Status:**
-!`if [ -s /tmp/.pr_status ]; then echo "[OK] PR exists: $(cat /tmp/.pr_status)"; else echo "[WARN] No PR created yet"; fi`
+!`CURRENT_BRANCH=$(git branch --show-current); [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"; PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"; if jq -e --arg branch "$CURRENT_BRANCH" '.state == "open" and .branch == $branch and (.number | type == "number")' "$PR_STATUS_FILE" >/dev/null 2>&1; then echo "[OK] PR exists: $(jq -r .url "$PR_STATUS_FILE")"; else echo "[WARN] No PR created yet"; fi`
 
 **Before proceeding, verify PR exists:**
 ```bash
-if [ ! -s /tmp/.pr_status ]; then
+CURRENT_BRANCH=$(git branch --show-current)
+[ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"
+PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"
+if ! jq -e --arg branch "$CURRENT_BRANCH" \
+    '.state == "open" and .branch == $branch and (.number | type == "number")' \
+    "$PR_STATUS_FILE" >/dev/null 2>&1; then
     echo "[ERROR] No PR has been created yet."
     exit 1
 fi
