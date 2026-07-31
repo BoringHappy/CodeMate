@@ -17,7 +17,7 @@ CodeMate solves this by running Claude Code in an isolated Docker container wher
 - Automated repository cloning and PR management
 - Pre-installed: Go, Node.js, Python, Rust, uv
 - zsh with Oh My Zsh
-- Persistent home configuration through `~/.codemate`
+- Persistent home configuration through `CODEMATE_HOME` (default `~/.codemate`)
 - Built-in Claude Code skills for PR workflow automation
 - Slack and Lark notifications when Claude stops (via `SLACK_WEBHOOK` / `LARK_WEBHOOK`)
 - tmux session management with PR comment monitoring
@@ -30,7 +30,7 @@ CodeMate solves this by running Claude Code in an isolated Docker container wher
 - GitHub CLI (`gh`) authenticated
 - Anthropic API key
 
-Run `codemate --setup` to create the required configuration files (global config in `~/.codemate/` and project `.env`).
+Run `codemate --setup` to create the required configuration files (global config in `CODEMATE_HOME`, default `~/.codemate/`, and project `.env`).
 
 > **Note:** `git` is also required as a prerequisite; the CLI checks for it at startup.
 
@@ -138,12 +138,12 @@ codemate --branch feature/xyz --tz America/New_York
 ```
 
 The setup command will:
-1. Create global configuration in `~/.codemate/` (Claude config and settings)
+1. Create global configuration in `CODEMATE_HOME` (default `~/.codemate/`; Claude config and settings)
 2. Create project-specific `.env` file in your current directory
 3. Prompt you for Anthropic API token and other settings
 
 **Configuration Structure:**
-- **Global config**: `~/.codemate/` - shared home state; each top-level file or directory is mounted into `$HOME` with the same basename
+- **Global config**: `CODEMATE_HOME` (default `~/.codemate/`) - shared home state; each top-level file or directory is mounted into `$HOME` with the same basename. Override the location with the `CODEMATE_HOME` environment variable (e.g., `export CODEMATE_HOME=/data/codemate`) to keep it anywhere on disk, not bound to `~/.codemate`
 - **Project config**: `.env` in each project directory - Project-specific secrets and settings
 
 **Repository URL Resolution**: The CLI determines the repository URL in this priority order:
@@ -239,6 +239,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
 | `CODEMATE_CO_AUTHOR_BY` | No | Commit co-author used by the Git commit skill, e.g. `Name <email@example.com>` or `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
+| `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
 | `CODEMATE_NO_PR` | No | Skip PR creation and branch push |
 | `CODEMATE_CHAT` | No | Chat mode; derives `CODEMATE_NO_PR=true` and skips CodeMate system prompt injection |
