@@ -1,7 +1,7 @@
 {
   "name": "workspace",
   "description": "CodeMate workspace plugin — session lifecycle hooks, Slack notifications, and repo setup utilities",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "author": {
     "name": "CodeMate"
   },

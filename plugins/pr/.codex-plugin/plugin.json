@@ -1,6 +1,6 @@
 {
   "name": "pr",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "GitHub Pull Request workflow management with skills for creating, updating, and managing PRs",
   "author": {
     "name": "CodeMate"

@@ -82,7 +82,7 @@ The marketplace is fetched from the external repository: `BoringHappy/CodeMatePl
 **Workspace Plugin** (`workspace@codemate`):
 - Session lifecycle hooks: tracks SessionStart, UserPromptSubmit, and Stop in instance/agent/session-scoped runtime directories, with workspace state partitioned again by worktree and branch and PR polling serialized by a branch lease
 - PR monitor: polls immediately, then after 10/30/60/120 seconds while that session remains stopped; Claude uses background `asyncRewake`, while Codex uses native synchronous Stop continuation output
-- Branch PR state: stored per worktree under `<absolute-git-dir>/codemate/pr-status/<branch>.json`
+- Branch PR state: resolved live from GitHub via the `pr` plugin's `pr-status` interface (query-first); monitor cursors and locks live under the runtime root, keyed by worktree + branch
 - Slack notification on Stop: sends a message to `SLACK_WEBHOOK` when new commits are pushed (requires `SLACK_WEBHOOK` env var)
 - `/workspace:best-practice` - Bootstrap a repo with spec issue templates, labels, and PR template
 

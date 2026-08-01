@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import time
@@ -9,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = ROOT / "plugins" / "workspace" / "hooks"
+PR_STATUS = ROOT / "plugins" / "pr" / "scripts" / "pr-status.sh"
 
 
 def run_hook(script: str, hook_input: dict, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -40,6 +42,98 @@ def hook_input(session_id: str, cwd: Path, event: str, **extra: object) -> dict:
         "hook_event_name": event,
         "stop_hook_active": False,
     } | extra
+
+
+def gh_pr_list_json(number: int, branch: str = "feature/hooks") -> str:
+    return json.dumps(
+        [
+            {
+                "number": number,
+                "url": f"https://github.com/example/repo/pull/{number}",
+                "state": "OPEN",
+                "headRefName": branch,
+            }
+        ]
+    )
+
+
+def gh_pr_view_json(number: int, *, draft: bool = False, labels: list[str] | None = None) -> str:
+    return json.dumps(
+        {
+            "number": number,
+            "state": "OPEN",
+            "url": f"https://github.com/example/repo/pull/{number}",
+            "isDraft": draft,
+            "labels": labels or [],
+            "statusCheckRollup": [],
+            "headRefOid": "abc123",
+        }
+    )
+
+
+def write_gh(
+    fake_bin: Path,
+    number: int,
+    *,
+    draft: bool = False,
+    labels: list[str] | None = None,
+    api_issues: str = "",
+    api_pulls: str = "",
+) -> None:
+    """Writes a fake `gh` that answers the query-first `pr list` resolution,
+    `pr view`, and (optionally) the issue/pull comment APIs."""
+    lines = [
+        "#!/usr/bin/env bash\n",
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n",
+        "if [ \"$1 $2\" = \"pr list\" ]; then\n",
+        f"  printf '%s\\n' '{gh_pr_list_json(number)}'\n",
+        "  exit 0\n",
+        "fi\n",
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n",
+        f"  printf '%s\\n' '{gh_pr_view_json(number, draft=draft, labels=labels)}'\n",
+        "  exit 0\n",
+        "fi\n",
+    ]
+    if api_issues:
+        lines += [
+            "if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/issues/'* ]]; then\n",
+            f"{api_issues}",
+            "  exit 0\n",
+            "fi\n",
+        ]
+    else:
+        lines += ["if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/issues/'* ]]; then exit 0; fi\n"]
+    if api_pulls:
+        lines += [
+            "if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/pulls/'* ]]; then\n",
+            f"{api_pulls}",
+            "  exit 0\n",
+            "fi\n",
+        ]
+    else:
+        lines += ["if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/pulls/'* ]]; then exit 0; fi\n"]
+    lines += ["exit 1\n"]
+    (fake_bin / "gh").write_text("".join(lines))
+    (fake_bin / "gh").chmod(0o755)
+
+
+def monitor_state_path(runtime: Path, repo: Path, branch: str = "feature/hooks") -> Path:
+    git_dir = subprocess.run(
+        ["git", "rev-parse", "--absolute-git-dir"], cwd=repo, text=True, capture_output=True, check=True
+    ).stdout.strip()
+    key = hashlib.sha256(f"{git_dir}\n{branch}".encode()).hexdigest()
+    return runtime / "monitor" / f"{key}.monitor-state.json"
+
+
+def run_pr_status(*args: str, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(PR_STATUS), *args],
+        cwd=cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def test_agent_hook_configs_use_supported_stop_delivery() -> None:
@@ -200,30 +294,7 @@ def test_monitor_checks_immediately_and_uses_stop_continuation(tmp_path: Path) -
     fake_bin.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 41,
-                "url": "https://github.com/example/repo/pull/41",
-            }
-        )
-    )
-
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":41,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/41\",\"isDraft\":false,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 41)
 
     env = os.environ.copy() | {
         "CODEMATE_AGENT": "codex",
@@ -241,6 +312,7 @@ def test_monitor_checks_immediately_and_uses_stop_continuation(tmp_path: Path) -
     assert output["decision"] == "block"
     assert "pr:update" in output["reason"]
     assert call_log.read_text().splitlines() == [
+        "pr list --head feature/hooks --state open --json number,url,state,headRefName",
         "pr view 41 --json number,state,url,isDraft,labels,statusCheckRollup,headRefOid"
     ]
 
@@ -248,10 +320,10 @@ def test_monitor_checks_immediately_and_uses_stop_continuation(tmp_path: Path) -
     run_hook("record_session_status.sh", active, cwd=repo, env=env)
     result = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
     assert result.stdout == ""
-    assert len(call_log.read_text().splitlines()) == 1
+    assert len(call_log.read_text().splitlines()) == 2
 
 
-def test_monitor_requires_branch_local_pr_state_before_gh(tmp_path: Path) -> None:
+def test_monitor_requires_pr_before_gh(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
     fake_bin = tmp_path / "bin"
@@ -281,7 +353,11 @@ def test_monitor_requires_branch_local_pr_state_before_gh(tmp_path: Path) -> Non
 
     result = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
     assert result.stdout == ""
-    assert not call_log.exists()
+    # Query-first resolution makes exactly one `gh pr list` call; with no PR it
+    # stops before any polling calls.
+    assert call_log.read_text().splitlines() == [
+        "pr list --head feature/hooks --state open --json number,url,state,headRefName"
+    ]
 
 
 def test_old_monitor_exits_when_a_newer_stop_generation_exists(tmp_path: Path) -> None:
@@ -292,19 +368,6 @@ def test_old_monitor_exits_when_a_newer_stop_generation_exists(tmp_path: Path) -
     repo.mkdir()
     fake_bin.mkdir()
     init_repo(repo)
-
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 43,
-                "url": "https://github.com/example/repo/pull/43",
-            }
-        )
-    )
 
     fake_gh = fake_bin / "gh"
     fake_gh.write_text(
@@ -340,31 +403,7 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     fake_bin.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 42,
-                "url": "https://github.com/example/repo/pull/42",
-            }
-        )
-    )
-
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":42,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/42\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
-        "exit 1\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 42, draft=True)
 
     env = os.environ.copy() | {
         "CODEMATE_AGENT": "codex",
@@ -393,7 +432,7 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     try:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 4:
                 break
             time.sleep(0.02)
         else:
@@ -410,7 +449,7 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     assert process.returncode == 0
     assert stdout == ""
     assert stderr == ""
-    assert len(call_log.read_text().splitlines()) == 3
+    assert len(call_log.read_text().splitlines()) == 4
 
 
 def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None:
@@ -424,31 +463,7 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
     codex_home.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 47,
-                "url": "https://github.com/example/repo/pull/47",
-            }
-        )
-    )
-
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":47,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/47\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
-        "exit 1\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 47, draft=True)
 
     history = codex_home / "history.jsonl"
     history.write_text(json.dumps({"session_id": "pending-prompt-session", "ts": 100}) + "\n")
@@ -481,7 +496,7 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
     try:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 4:
                 break
             time.sleep(0.02)
         else:
@@ -499,7 +514,7 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
     assert process.returncode == 0
     assert stdout == ""
     assert stderr == ""
-    assert len(call_log.read_text().splitlines()) == 3
+    assert len(call_log.read_text().splitlines()) == 4
 
 
 def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> None:
@@ -513,31 +528,7 @@ def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> Non
     claude_home.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 48,
-                "url": "https://github.com/example/repo/pull/48",
-            }
-        )
-    )
-
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":48,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/48\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
-        "exit 1\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 48, draft=True)
 
     history = claude_home / "history.jsonl"
     history.write_text(json.dumps({"sessionId": "pending-claude-session", "timestamp": 100000, "display": "first"}) + "\n")
@@ -570,7 +561,7 @@ def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> Non
     try:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 4:
                 break
             time.sleep(0.02)
         else:
@@ -586,7 +577,7 @@ def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> Non
     assert process.returncode == 0
     assert stdout == ""
     assert stderr == ""
-    assert len(call_log.read_text().splitlines()) == 3
+    assert len(call_log.read_text().splitlines()) == 4
 
 
 def test_monitor_checks_both_histories_when_runtime_is_unidentified(tmp_path: Path) -> None:
@@ -602,31 +593,7 @@ def test_monitor_checks_both_histories_when_runtime_is_unidentified(tmp_path: Pa
     claude_home.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 49,
-                "url": "https://github.com/example/repo/pull/49",
-            }
-        )
-    )
-
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":49,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/49\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
-        "exit 1\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 49, draft=True)
 
     (codex_home / "history.jsonl").write_text(
         json.dumps({"session_id": "dual-history-session", "ts": 100}) + "\n"
@@ -668,7 +635,7 @@ def test_monitor_checks_both_histories_when_runtime_is_unidentified(tmp_path: Pa
     try:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 4:
                 break
             time.sleep(0.02)
         else:
@@ -690,7 +657,7 @@ def test_monitor_checks_both_histories_when_runtime_is_unidentified(tmp_path: Pa
     assert process.returncode == 0
     assert stdout == ""
     assert stderr == ""
-    assert len(call_log.read_text().splitlines()) == 3
+    assert len(call_log.read_text().splitlines()) == 4
 
 
 def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
@@ -702,30 +669,7 @@ def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
     fake_bin.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 46,
-                "url": "https://github.com/example/repo/pull/46",
-            }
-        )
-    )
-
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":46,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/46\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 0\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 46, draft=True)
 
     env = os.environ.copy() | {
         "CODEMATE_AGENT": "codex",
@@ -741,8 +685,9 @@ def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
     result = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
 
     assert result.stdout == ""
-    # Each poll makes 3 gh calls (pr view, issue comments, review comments).
-    assert len(call_log.read_text().splitlines()) == 30 * 3
+    # One query-first `pr list` resolution, then per poll:
+    # pr view + issue comments + review comments.
+    assert len(call_log.read_text().splitlines()) == 1 + 30 * 3
 
 
 def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path) -> None:
@@ -753,18 +698,6 @@ def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path
     fake_bin.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 44,
-                "url": "https://github.com/example/repo/pull/44",
-            }
-        )
-    )
     comments = [
         {
             "id": comment_id,
@@ -787,25 +720,12 @@ def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path
         }
     )
     review_output = "".join(f"printf '%s\\n' '{json.dumps(comment)}'\n" for comment in comments)
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        "#!/usr/bin/env bash\n"
-        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
-        "  printf '%s\\n' '{\"number\":44,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/44\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/issues/'* ]]; then exit 0; fi\n"
-        "if [ \"$1\" = \"api\" ] && [[ \"$*\" == *'/pulls/'* ]]; then\n"
-        f"{review_output}"
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n"
-    )
-    fake_gh.chmod(0o755)
+    write_gh(fake_bin, 44, draft=True, api_pulls=review_output)
 
     env = os.environ.copy() | {
         "CODEMATE_AGENT": "codex",
         "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_TEST_GH_LOG": str(tmp_path / "gh-calls.log"),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
     env.pop("CODEMATE_NO_PR", None)
@@ -814,7 +734,7 @@ def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path
 
     first = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
     first_reason = json.loads(first.stdout)["reason"]
-    monitor_state = Path(f"{status_file}.monitor-state.json")
+    monitor_state = monitor_state_path(runtime, repo)
     assert "comment_id: 2" in first_reason
     assert "comment_id: 3" in first_reason
     assert "comment_id: 4" in first_reason
@@ -838,22 +758,14 @@ def test_branch_lease_hands_polling_to_another_stopped_session(tmp_path: Path) -
     fake_bin.mkdir()
     init_repo(repo)
 
-    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
-    status_file.parent.mkdir(parents=True)
-    status_file.write_text(
-        json.dumps(
-            {
-                "state": "open",
-                "branch": "feature/hooks",
-                "number": 45,
-                "url": "https://github.com/example/repo/pull/45",
-            }
-        )
-    )
     fake_gh = fake_bin / "gh"
     fake_gh.write_text(
         "#!/usr/bin/env bash\n"
         "printf '%s:%s\\n' \"$CODEMATE_TEST_CALLER\" \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr list\" ]; then\n"
+        f"  printf '%s\\n' '{gh_pr_list_json(45)}'\n"
+        "  exit 0\n"
+        "fi\n"
         "if [ \"$1 $2\" = \"pr view\" ]; then\n"
         "  printf '%s\\n' '{\"number\":45,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/45\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
         "  exit 0\n"
@@ -899,7 +811,7 @@ def test_branch_lease_hands_polling_to_another_stopped_session(tmp_path: Path) -
         processes.append(process_a)
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 4:
                 break
             time.sleep(0.02)
         else:
@@ -913,7 +825,7 @@ def test_branch_lease_hands_polling_to_another_stopped_session(tmp_path: Path) -
         run_hook("record_session_status.sh", hook_input("lease-session-a", repo, "UserPromptSubmit"), cwd=repo, env=env_a)
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
-            if len(call_log.read_text().splitlines()) == 6:
+            if len(call_log.read_text().splitlines()) == 8:
                 break
             time.sleep(0.02)
         else:
@@ -932,4 +844,214 @@ def test_branch_lease_hands_polling_to_another_stopped_session(tmp_path: Path) -
                 process.wait(timeout=3)
 
     callers = [line.split(":", 1)[0] for line in call_log.read_text().splitlines()]
-    assert callers == ["a", "a", "a", "b", "b", "b"]
+    assert callers == ["a", "a", "a", "a", "b", "b", "b", "b"]
+
+
+def _pr_env(fake_bin: Path, runtime: Path, call_log: Path | None = None) -> dict[str, str]:
+    env = os.environ.copy() | {
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    if call_log is not None:
+        env["CODEMATE_TEST_GH_LOG"] = str(call_log)
+    env.pop("CODEMATE_AGENT", None)
+    env.pop("CODEMATE_NO_PR", None)
+    env.pop("PLUGIN_ROOT", None)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+    return env
+
+
+def test_pr_status_get_resolves_from_github_and_caches(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    fake_bin = tmp_path / "bin"
+    runtime = tmp_path / "runtime"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+    write_gh(fake_bin, 51)
+
+    env = _pr_env(fake_bin, runtime, call_log)
+    first = run_pr_status("get", cwd=repo, env=env)
+    assert first.returncode == 0, first.stderr
+    payload = json.loads(first.stdout)
+    assert payload == {
+        "number": 51,
+        "url": "https://github.com/example/repo/pull/51",
+        "state": "OPEN",
+        "branch": "feature/hooks",
+        "source": "github",
+    }
+    assert call_log.read_text().splitlines() == [
+        "pr list --head feature/hooks --state open --json number,url,state,headRefName"
+    ]
+    caches = list((runtime / "pr-status").glob("*.json"))
+    assert len(caches) == 1
+    assert json.loads(caches[0].read_text())["number"] == 51
+
+    # GitHub becomes unavailable: the plugin-owned cache is the fallback.
+    (fake_bin / "gh").write_text("#!/usr/bin/env bash\nexit 1\n")
+    (fake_bin / "gh").chmod(0o755)
+    second = run_pr_status("get", cwd=repo, env=env)
+    assert second.returncode == 0, second.stderr
+    payload = json.loads(second.stdout)
+    assert payload["number"] == 51
+    assert payload["source"] == "cache"
+
+
+def test_pr_status_get_migrates_legacy_status_file(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    fake_bin = tmp_path / "bin"
+    runtime = tmp_path / "runtime"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+
+    legacy = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 52,
+                "url": "https://github.com/example/repo/pull/52",
+            }
+        )
+    )
+    (fake_bin / "gh").write_text("#!/usr/bin/env bash\nexit 1\n")
+    (fake_bin / "gh").chmod(0o755)
+
+    env = _pr_env(fake_bin, runtime)
+    result = run_pr_status("get", cwd=repo, env=env)
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["number"] == 52
+    assert payload["source"] == "cache"
+    caches = list((runtime / "pr-status").glob("*.json"))
+    assert len(caches) == 1
+    assert json.loads(caches[0].read_text())["number"] == 52
+
+
+def test_pr_status_get_uses_fork_workflow_query(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    fake_bin = tmp_path / "bin"
+    runtime = tmp_path / "runtime"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/forkowner/repo.git"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "remote", "add", "upstream", "https://github.com/upstream/repo.git"],
+        cwd=repo,
+        check=True,
+    )
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr list\" ]; then\n"
+        f"  printf '%s\\n' '{gh_pr_list_json(53)}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    env = _pr_env(fake_bin, runtime, call_log)
+    result = run_pr_status("get", cwd=repo, env=env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["number"] == 53
+    query = call_log.read_text().splitlines()[0]
+    assert "--repo upstream/repo" in query
+    assert "--head forkowner:feature/hooks" in query
+
+
+def test_pr_status_set_and_clear(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    fake_bin = tmp_path / "bin"
+    runtime = tmp_path / "runtime"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+    (fake_bin / "gh").write_text("#!/usr/bin/env bash\nexit 1\n")
+    (fake_bin / "gh").chmod(0o755)
+
+    env = _pr_env(fake_bin, runtime)
+    result = run_pr_status(
+        "set",
+        "--number",
+        "54",
+        "--url",
+        "https://github.com/example/repo/pull/54",
+        "--branch",
+        "feature/hooks",
+        cwd=repo,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+
+    result = run_pr_status("get", cwd=repo, env=env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["number"] == 54
+
+    result = run_pr_status("clear", cwd=repo, env=env)
+    assert result.returncode == 0, result.stderr
+    result = run_pr_status("get", cwd=repo, env=env)
+    assert result.returncode == 1
+
+
+def test_monitor_uses_configured_reply_prefix_and_ack_reaction(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    init_repo(repo)
+
+    comments = [
+        {
+            "id": 1,
+            "user": {"login": "human"},
+            "body": "Custom: already handled",
+            "reactions": {"eyes": 0, "rocket": 1},
+        },
+        {
+            "id": 2,
+            "user": {"login": "human"},
+            "body": "already acked with rocket",
+            "reactions": {"eyes": 0, "rocket": 1},
+        },
+        {
+            "id": 3,
+            "user": {"login": "human"},
+            "body": "please fix this",
+            "reactions": {},
+        },
+    ]
+    issue_output = "".join(f"printf '%s\\n' '{json.dumps(comment)}'\n" for comment in comments)
+    write_gh(fake_bin, 60, draft=True, api_issues=issue_output)
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_REPLY_PREFIX": "Custom:",
+        "CODEMATE_ACK_REACTION": "rocket",
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    stop = hook_input("marker-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    result = run_hook("monitor_pr.sh", stop, cwd=repo, env=env)
+    reason = json.loads(result.stdout)["reason"]
+    assert "please fix this" in reason
+    assert "Custom: already handled" not in reason
+    assert "already acked with rocket" not in reason

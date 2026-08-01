@@ -411,7 +411,7 @@ The hook verifies that its own session is still stopped and that the current wor
 ### State Isolation
 
 - Session status is keyed by runtime instance, agent, and `session_id`; notification commit baselines and retry counters are partitioned again by Git worktree and branch.
-- PR lifecycle state is stored at `<absolute-git-dir>/codemate/pr-status/<branch>.json`; adjacent monitor-state and lock files hold shared cursors and an interruptible branch lease, so only one stopped session handles a given PR event.
+- PR state is resolved live from GitHub (source of truth) through the `pr` plugin's query-first `pr-status` interface, so no shared PR-status file exists between plugins. The pr plugin keeps only a private runtime-root cache for disambiguation; workspace monitor-state and lock files hold shared cursors and an interruptible branch lease under the runtime root (never inside `.git`), so only one stopped session handles a given PR event.
 - Docker container names include the runtime agent (`codemate-<agent>-<repo>-<branch>`), so Claude and Codex sessions for the same repository/branch can run concurrently on one machine without attaching to each other's container.
 - Each runtime keeps its own writable state under its own config directory: `CODEMATE_TMPDIR` and the derived hook runtime root are `/home/agent/.claude/tmp` for Claude and `/home/agent/.codex/tmp` for Codex, so temp files and session state never share a location across runtimes. CodeMate never overrides the global `TMPDIR`, which would affect every process in the container.
 - Fixed shared files such as `/tmp/.session_status`, `/tmp/.pr_status`, and `/tmp/pr-monitor-state` are not used.

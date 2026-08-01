@@ -7,6 +7,14 @@ description: Reads comments from a GitHub pull request, fixes the issues mention
 
 Automatically address feedback from GitHub pull request comments.
 
+## Shared Contract
+
+Reply-prefix and acknowledgment conventions are shared with the workspace
+monitor (see `docs/plugin-contracts.md`). The default reply prefix is
+`CodeMate Replied:`; deployments may override it with the
+`CODEMATE_REPLY_PREFIX` environment variable. Always use the effective prefix
+so the monitor recognizes resolved threads.
+
 ## What it does
 
 1. **Reads PR comments**: Uses comment details supplied in the user prompt when present. Only use `/pr:get-details` if the prompt does not include enough comment context.
@@ -20,19 +28,24 @@ Automatically address feedback from GitHub pull request comments.
 ## Prerequisites
 
 **Check PR Status:**
-!`CURRENT_BRANCH=$(git branch --show-current); [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"; PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"; if jq -e --arg branch "$CURRENT_BRANCH" '.state == "open" and .branch == $branch and (.number | type == "number")' "$PR_STATUS_FILE" >/dev/null 2>&1; then echo "[OK] PR exists: $(jq -r .url "$PR_STATUS_FILE")"; else echo "[WARN] No PR created yet"; fi`
+!`CURRENT_BRANCH=$(git branch --show-current); [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"; if git remote get-url upstream >/dev/null 2>&1; then UPSTREAM_REPO=$(git remote get-url upstream | sed 's/.*github.com[:/]//' | sed 's/.git$//'); FORK_OWNER=$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/.git$//' | cut -d'/' -f1); PR=$(gh pr list --repo "$UPSTREAM_REPO" --head "$FORK_OWNER:$CURRENT_BRANCH" --state open --json number,url,state -q '.[0]'); else PR=$(gh pr list --head "$CURRENT_BRANCH" --state open --json number,url,state -q '.[0]'); fi; if [ -z "$PR" ] || [ "$PR" = "null" ]; then echo "[ERROR] No open pull request found for branch '$CURRENT_BRANCH'. Create one with /pr:create first."; exit 1; fi; echo "[OK] PR #$(printf '%s' "$PR" | jq -r .number): $(printf '%s' "$PR" | jq -r .url)"`
 
 **Before proceeding, verify PR exists:**
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
 [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"
-PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"
-if ! jq -e --arg branch "$CURRENT_BRANCH" \
-    '.state == "open" and .branch == $branch and (.number | type == "number")' \
-    "$PR_STATUS_FILE" >/dev/null 2>&1; then
-    echo "[ERROR] No PR has been created yet."
+if git remote get-url upstream >/dev/null 2>&1; then
+  UPSTREAM_REPO=$(git remote get-url upstream | sed 's/.*github.com[:/]//' | sed 's/.git$//')
+  FORK_OWNER=$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/.git$//' | cut -d'/' -f1)
+  PR=$(gh pr list --repo "$UPSTREAM_REPO" --head "$FORK_OWNER:$CURRENT_BRANCH" --state open --json number,url,state -q '.[0]')
+else
+  PR=$(gh pr list --head "$CURRENT_BRANCH" --state open --json number,url,state -q '.[0]')
+fi
+if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+    echo "[ERROR] No open pull request found for branch '$CURRENT_BRANCH'. Create one with /pr:create first."
     exit 1
 fi
+echo "[OK] PR #$(printf '%s' "$PR" | jq -r .number): $(printf '%s' "$PR" | jq -r .url)"
 ```
 
 - Must be run in a git repository

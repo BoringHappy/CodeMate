@@ -98,27 +98,44 @@ gh pr create \
 PR_URL=$(gh pr view --json url -q .url)
 ```
 
-### 4. Update PR Status File
+### 4. Persist the PR Reference
 
-**IMPORTANT**: After successfully creating the PR, write branch-scoped status
-under the current Git worktree so concurrent repositories, branches, and agent
-sessions cannot overwrite each other:
+**IMPORTANT**: After successfully creating the PR, record it through the pr
+plugin's own `pr-status` interface. The cache is keyed by Git worktree + branch
+under the runtime root, so concurrent repositories, branches, and agent
+sessions cannot overwrite each other. If the interface script cannot be
+located (e.g. bare manual installs), fall back to the legacy per-worktree
+status file so older workspace hooks keep working:
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
 [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"
 PR_NUMBER=${PR_URL%/}
 PR_NUMBER=${PR_NUMBER##*/}
-PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"
-mkdir -p "$(dirname "$PR_STATUS_FILE")"
-PR_STATUS_TMP=$(mktemp "$(dirname "$PR_STATUS_FILE")/.pr-status.XXXXXX")
-jq -n \
-  --arg branch "$CURRENT_BRANCH" \
-  --arg url "$PR_URL" \
-  --argjson number "$PR_NUMBER" \
-  --arg updated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-  '{state: "open", branch: $branch, number: $number, url: $url, updated_at: $updated_at}' \
-  > "$PR_STATUS_TMP"
-mv "$PR_STATUS_TMP" "$PR_STATUS_FILE"
+
+PR_STATUS_SCRIPT=""
+for _cand in \
+    "${CODEMATE_PR_PLUGIN_ROOT:-}/scripts/pr-status.sh" \
+    "${CODEMATE_PLUGIN_ROOT:-}/../pr/scripts/pr-status.sh" \
+    "${PLUGIN_ROOT:-}/../pr/scripts/pr-status.sh" \
+    "${CLAUDE_PLUGIN_ROOT:-}/../pr/scripts/pr-status.sh"; do
+    [ -n "$_cand" ] && [ -x "$_cand" ] && { PR_STATUS_SCRIPT="$_cand"; break; }
+done
+
+if [ -n "$PR_STATUS_SCRIPT" ]; then
+    "$PR_STATUS_SCRIPT" set --number "$PR_NUMBER" --url "$PR_URL" --branch "$CURRENT_BRANCH"
+else
+    PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"
+    mkdir -p "$(dirname "$PR_STATUS_FILE")"
+    PR_STATUS_TMP=$(mktemp "$(dirname "$PR_STATUS_FILE")/.pr-status.XXXXXX")
+    jq -n \
+      --arg branch "$CURRENT_BRANCH" \
+      --arg url "$PR_URL" \
+      --argjson number "$PR_NUMBER" \
+      --arg updated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+      '{state: "open", branch: $branch, number: $number, url: $url, updated_at: $updated_at}' \
+      > "$PR_STATUS_TMP"
+    mv "$PR_STATUS_TMP" "$PR_STATUS_FILE"
+fi
 echo "✓ PR created and status saved: $PR_URL"
 ```
 
@@ -140,5 +157,6 @@ Show the user:
 
 - This skill handles both standard and fork workflows automatically
 - For fork workflows, it creates a cross-repo PR from your fork to the upstream repository
-- PR status is stored per Git worktree and branch under
-  `<absolute-git-dir>/codemate/pr-status/<branch>.json`
+- PR state lives in GitHub; the local cache is keyed by Git worktree + branch
+  under the runtime root (legacy per-worktree files are only written as a
+  fallback for older workspace hooks)

@@ -12,14 +12,22 @@ Retrieves and displays pull request information including title, description, ch
 !```bash
 CURRENT_BRANCH=$(git branch --show-current)
 [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="detached-$(git rev-parse --short=12 HEAD)"
-PR_STATUS_FILE="$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json"
-if ! jq -e --arg branch "$CURRENT_BRANCH" \
-    '.state == "open" and .branch == $branch and (.number | type == "number")' \
-    "$PR_STATUS_FILE" >/dev/null 2>&1; then
-    echo "[ERROR] No PR has been created yet."
+
+# GitHub is the source of truth for PR state — no local status file required.
+# This works for both standard and fork workflows.
+if git remote get-url upstream >/dev/null 2>&1; then
+  UPSTREAM_REPO=$(git remote get-url upstream | sed 's/.*github.com[:/]//' | sed 's/.git$//')
+  FORK_OWNER=$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/.git$//' | cut -d'/' -f1)
+  PR=$(gh pr list --repo "$UPSTREAM_REPO" --head "$FORK_OWNER:$CURRENT_BRANCH" --state open --json number,url,state -q '.[0]')
+else
+  PR=$(gh pr list --head "$CURRENT_BRANCH" --state open --json number,url,state -q '.[0]')
+fi
+
+if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+    echo "[ERROR] No open pull request found for branch '$CURRENT_BRANCH'. Create one with /pr:create first."
     exit 1
 fi
-echo "[OK] PR exists: $(jq -r .url "$PR_STATUS_FILE")"
+echo "[OK] PR #$(printf '%s' "$PR" | jq -r .number): $(printf '%s' "$PR" | jq -r .url)"
 ```
 
 ## PR Information

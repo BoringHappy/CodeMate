@@ -50,6 +50,20 @@ def get_pr_template(workspace):
 """
 
 
+def resolve_pr_status_script():
+    """Locate the pr plugin's pr-status.sh interface, if installed."""
+    candidates = [
+        os.path.join(os.environ.get("CODEMATE_PR_PLUGIN_ROOT", ""), "scripts", "pr-status.sh"),
+        os.path.join(os.environ.get("CODEMATE_PLUGIN_ROOT", ""), "..", "pr", "scripts", "pr-status.sh"),
+        os.path.join(os.environ.get("PLUGIN_ROOT", ""), "..", "pr", "scripts", "pr-status.sh"),
+        os.path.join(os.environ.get("CLAUDE_PLUGIN_ROOT", ""), "..", "pr", "scripts", "pr-status.sh"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def main():
     git_repo_url = os.environ["CODEMATE_GIT_REPO_URL"]
     upstream_repo_url = os.getenv("CODEMATE_UPSTREAM_REPO_URL", "")
@@ -182,18 +196,15 @@ def main():
     if pr_url:
         print(f"  PR URL: {BLUE}{pr_url}{RESET}")
 
-    # Write branch-scoped PR status under this worktree's Git metadata. This is
-    # isolated across repositories, worktrees, and branches while remaining
-    # discoverable by both Claude and Codex plugin workflows.
+    # Record the created PR through the pr plugin's `pr-status` interface when
+    # it is available, so the runtime-root cache is the single local source.
+    # Fall back to the legacy per-worktree status file (`.git/codemate/pr-status/`)
+    # when the plugin is not installed yet (plugin setup runs after repo setup);
+    # pr-status.sh migrates the legacy file on first read.
     try:
         current_branch = run("git branch --show-current").stdout.strip()
         if not current_branch:
             current_branch = f"detached-{run('git rev-parse --short=12 HEAD').stdout.strip()}"
-        git_dir = run("git rev-parse --absolute-git-dir").stdout.strip()
-        pr_status_file = os.path.join(
-            git_dir, "codemate", "pr-status", f"{current_branch}.json"
-        )
-        os.makedirs(os.path.dirname(pr_status_file), exist_ok=True)
 
         resolved_pr_number = None
         if pr_number.isdigit():
@@ -203,33 +214,59 @@ def main():
             if url_number.isdigit():
                 resolved_pr_number = int(url_number)
 
-        status = {
-            "state": "open" if pr_url else "none",
-            "branch": current_branch,
-            "number": resolved_pr_number,
-            "url": pr_url if pr_url else "",
-            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-
-        # Use an atomic same-directory rename so readers never see partial JSON.
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            delete=False,
-            dir=os.path.dirname(pr_status_file),
-            prefix=".pr-status.",
-        ) as f:
-            json.dump(status, f)
-            f.write("\n")
-            temp_path = f.name
-
-        os.rename(temp_path, pr_status_file)
-
-        if pr_url:
-            print(f"  {GREEN}✓ Branch PR status saved to {pr_status_file}{RESET}")
-        else:
+        pr_status_script = resolve_pr_status_script()
+        if pr_status_script and (pr_url or resolved_pr_number is not None):
+            args = [pr_status_script, "set", "--branch", current_branch]
+            if resolved_pr_number is not None:
+                args += ["--number", str(resolved_pr_number)]
+            if pr_url:
+                args += ["--url", pr_url]
+            result = subprocess.run(args, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(
+                    f"  {YELLOW}Warning: pr-status set failed: {result.stderr.strip()}{RESET}"
+                )
+            elif pr_url:
+                print(f"  {GREEN}✓ Branch PR saved via {pr_status_script}{RESET}")
+            else:
+                print(f"  {YELLOW}No PR exists yet. Create one when ready.{RESET}")
+        elif pr_status_script:
+            # Query-first resolution needs no local "no PR" marker.
             print(f"  {YELLOW}No PR exists yet. Create one when ready.{RESET}")
+        else:
+            git_dir = run("git rev-parse --absolute-git-dir").stdout.strip()
+            pr_status_file = os.path.join(
+                git_dir, "codemate", "pr-status", f"{current_branch}.json"
+            )
+            os.makedirs(os.path.dirname(pr_status_file), exist_ok=True)
+
+            status = {
+                "state": "open" if pr_url else "none",
+                "branch": current_branch,
+                "number": resolved_pr_number,
+                "url": pr_url if pr_url else "",
+                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+
+            # Use an atomic same-directory rename so readers never see partial JSON.
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                delete=False,
+                dir=os.path.dirname(pr_status_file),
+                prefix=".pr-status.",
+            ) as f:
+                json.dump(status, f)
+                f.write("\n")
+                temp_path = f.name
+
+            os.rename(temp_path, pr_status_file)
+
+            if pr_url:
+                print(f"  {GREEN}✓ Branch PR status saved to {pr_status_file}{RESET}")
+            else:
+                print(f"  {YELLOW}No PR exists yet. Create one when ready.{RESET}")
     except Exception as e:
-        print(f"  {YELLOW}Warning: Failed to write PR status file: {e}{RESET}")
+        print(f"  {YELLOW}Warning: Failed to record PR status: {e}{RESET}")
         # Clean up temp file if it exists
         if 'temp_path' in locals() and os.path.exists(temp_path):
             os.unlink(temp_path)

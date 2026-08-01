@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 
 # Shared state helpers for workspace lifecycle hooks. Runtime state is scoped by
-# the agent-provided session ID, while PR state is scoped by Git worktree and
-# branch. This keeps concurrent repositories, worktrees, and agent sessions from
-# reading or overwriting one another's coordination files.
+# the agent-provided session ID, while monitor cursors are scoped by Git worktree
+# and branch. PR state itself lives in GitHub and is resolved through the pr
+# plugin's `pr-status` interface; the workspace plugin never parses a shared
+# PR-status file. This keeps concurrent repositories, worktrees, and agent
+# sessions from reading or overwriting one another's coordination files.
 
 codemate_runtime_root() {
     local root
@@ -276,36 +278,108 @@ codemate_current_branch() {
     printf 'detached-%s\n' "$branch"
 }
 
-codemate_pr_status_file() {
+codemate_worktree_key() {
     local git_dir branch
 
     git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 1
     branch=$(codemate_current_branch) || return 1
-    printf '%s/codemate/pr-status/%s.json\n' "$git_dir" "$branch"
+    printf '%s\n%s' "$git_dir" "$branch" | sha256sum | awk '{print $1}'
 }
 
+# Workspace-private monitor cursor/lock base, keyed by Git worktree + branch.
+# This is runtime state, so it lives under the runtime root (never inside .git).
+codemate_monitor_state_base() {
+    local key root
+
+    key=$(codemate_worktree_key) || return 1
+    root=$(codemate_runtime_root) || return 1
+    mkdir -p "$root/monitor"
+    printf '%s/monitor/%s\n' "$root" "$key"
+}
+
+# Locates the pr plugin's `pr-status.sh` interface. Resolution order:
+#   1. CODEMATE_PR_PLUGIN_ROOT (explicit install-time override)
+#   2. Same-marketplace sibling of this plugin (env roots or hook directory)
+#   3. Plugin CLI discovery (plain Claude Code / Codex installs)
+codemate_pr_status_script() {
+    local candidate base hook_dir
+
+    if [ -n "${CODEMATE_PR_PLUGIN_ROOT:-}" ]; then
+        candidate="$CODEMATE_PR_PLUGIN_ROOT/scripts/pr-status.sh"
+        [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+    fi
+
+    for base in \
+        "${CODEMATE_PLUGIN_ROOT:-}/../pr" \
+        "${PLUGIN_ROOT:-}/../pr" \
+        "${CLAUDE_PLUGIN_ROOT:-}/../pr"; do
+        [ -n "$base" ] || continue
+        candidate="$base/scripts/pr-status.sh"
+        [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+        # Versioned cache layout, e.g. ~/.claude/plugins/cache/codemate/pr/<ver>.
+        for candidate in "$base"/*/scripts/pr-status.sh; do
+            [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+        done
+    done
+
+    # Relative to this hook's own directory (repo checkout or marketplace cache).
+    hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null) || return 1
+    candidate="$hook_dir/../../pr/scripts/pr-status.sh"
+    [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+    for candidate in "$hook_dir"/../../pr/*/scripts/pr-status.sh; do
+        [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+    done
+
+    if command -v codex >/dev/null 2>&1; then
+        candidate=$(codex plugin list --json 2>/dev/null | jq -r '.installed[] | select(.name == "pr") | .source.path' | head -1)
+        if [ -n "$candidate" ]; then
+            candidate="$candidate/scripts/pr-status.sh"
+            [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+        fi
+    fi
+    if command -v claude >/dev/null 2>&1; then
+        candidate=$(claude plugin list --json 2>/dev/null | jq -r '.[] | select((.id | split("@")[0]) == "pr") | .installPath' | head -1)
+        if [ -n "$candidate" ]; then
+            candidate="$candidate/scripts/pr-status.sh"
+            [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+        fi
+    fi
+    return 1
+}
+
+# Resolves the open PR for the current worktree/branch. GitHub is the source of
+# truth; the pr plugin's `pr-status get` is the canonical implementation, with
+# an inline fallback (same contract) when the plugin is not installed.
 codemate_load_pr_reference() {
-    local status_file branch state file_branch number url
+    local script output number url branch owner upstream
 
     CODEMATE_CURRENT_PR_NUMBER=""
     CODEMATE_CURRENT_PR_URL=""
-    CODEMATE_CURRENT_PR_STATUS_FILE=""
 
     if codemate_truthy "${CODEMATE_NO_PR:-}"; then
         return 1
     fi
 
-    status_file=$(codemate_pr_status_file) || return 1
-    branch=$(codemate_current_branch) || return 1
-    CODEMATE_CURRENT_PR_STATUS_FILE="$status_file"
-
-    [ -s "$status_file" ] || return 1
-    state=$(jq -r '.state // "none"' "$status_file" 2>/dev/null) || return 1
-    file_branch=$(jq -r '.branch // ""' "$status_file" 2>/dev/null) || return 1
-    [ "$state" = "open" ] || return 1
-    [ "$file_branch" = "$branch" ] || return 1
-    number=$(jq -r '.number // empty' "$status_file" 2>/dev/null)
-    url=$(jq -r '.url // empty' "$status_file" 2>/dev/null)
+    script=$(codemate_pr_status_script 2>/dev/null) || script=""
+    if [ -n "$script" ]; then
+        # Preferred path: the pr plugin owns PR resolution.
+        output=$("$script" get 2>/dev/null) || return 1
+        number=$(printf '%s' "$output" | jq -r '.number // empty' 2>/dev/null)
+        url=$(printf '%s' "$output" | jq -r '.url // empty' 2>/dev/null)
+    else
+        # Fallback: same query-first contract, inlined.
+        branch=$(codemate_current_branch) || return 1
+        if git remote get-url upstream >/dev/null 2>&1; then
+            upstream=$(git remote get-url upstream | sed 's/.*github.com[:/]//' | sed 's/.git$//')
+            owner=$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/.git$//' | cut -d'/' -f1)
+            output=$(gh pr list --repo "$upstream" --head "$owner:$branch" --state open --json number,url,state -q '.[0]' 2>/dev/null) || return 1
+        else
+            output=$(gh pr list --head "$branch" --state open --json number,url,state -q '.[0]' 2>/dev/null) || return 1
+        fi
+        [ -n "$output" ] && [ "$output" != "null" ] || return 1
+        number=$(printf '%s' "$output" | jq -r '.number // empty' 2>/dev/null)
+        url=$(printf '%s' "$output" | jq -r '.url // empty' 2>/dev/null)
+    fi
 
     [[ "$number" =~ ^[0-9]+$ ]] || return 1
     CODEMATE_CURRENT_PR_NUMBER="$number"
@@ -313,37 +387,59 @@ codemate_load_pr_reference() {
     return 0
 }
 
-codemate_write_pr_state() {
-    local state="$1"
-    local number="${2:-}"
-    local url="${3:-}"
-    local status_file branch status_dir tmp updated_at number_json
+# Shared contract values between the pr plugin and the workspace monitor. All
+# are overridable via environment so deployments can rebrand or reuse these
+# plugins without changing code. See docs/plugin-contracts.md.
+codemate_reply_prefix() {
+    printf '%s\n' "${CODEMATE_REPLY_PREFIX:-CodeMate Replied:}"
+}
 
-    status_file=$(codemate_pr_status_file) || return 1
-    branch=$(codemate_current_branch) || return 1
-    status_dir=$(dirname "$status_file")
-    updated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    mkdir -p "$status_dir"
-    tmp=$(mktemp "$status_dir/.pr-status.XXXXXX") || return 1
+codemate_ack_reaction() {
+    printf '%s\n' "${CODEMATE_ACK_REACTION:-eyes}"
+}
 
-    if [[ "$number" =~ ^[0-9]+$ ]]; then
-        number_json="$number"
+codemate_ack_emoji() {
+    case "$(codemate_ack_reaction)" in
+        eyes) printf '👀' ;;
+        rocket) printf '🚀' ;;
+        heart) printf '❤️' ;;
+        hooray) printf '🎉' ;;
+        laugh) printf '😄' ;;
+        "+1") printf '👍' ;;
+        "-1") printf '👎' ;;
+        confused) printf '😕' ;;
+        *) printf '👀' ;;
+    esac
+}
+
+codemate_pr_updated_label() {
+    printf '%s\n' "${CODEMATE_PR_UPDATED_LABEL:-pr-updated}"
+}
+
+codemate_commit_command() {
+    printf '%s\n' "${CODEMATE_COMMIT_COMMAND:-git:commit}"
+}
+
+codemate_fix_comments_command() {
+    printf '%s\n' "${CODEMATE_FIX_COMMENTS_COMMAND:-pr:fix-comments}"
+}
+
+codemate_ack_comments_command() {
+    printf '%s\n' "${CODEMATE_ACK_COMMENTS_COMMAND:-pr:ack-comments}"
+}
+
+codemate_update_command() {
+    printf '%s\n' "${CODEMATE_UPDATE_COMMAND:-pr:update}"
+}
+
+# Renders an agent-appropriate reference to a skill: Codex uses
+# "the <name> skill", Claude Code uses "/<name>".
+codemate_skill_phrase() {
+    local command_name="$1"
+
+    if codemate_is_codex; then
+        printf 'the %s skill' "$command_name"
     else
-        number_json="null"
+        printf '/%s' "$command_name"
     fi
-
-    jq -n \
-        --arg state "$state" \
-        --arg branch "$branch" \
-        --arg url "$url" \
-        --arg updated_at "$updated_at" \
-        --argjson number "$number_json" \
-        '{
-            state: $state,
-            branch: $branch,
-            number: $number,
-            url: $url,
-            updated_at: $updated_at
-        }' > "$tmp"
-    mv "$tmp" "$status_file"
 }
