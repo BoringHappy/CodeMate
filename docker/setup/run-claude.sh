@@ -10,26 +10,13 @@ source "$SETUP_DIR/shell/common.sh"
 run_setup_script "$SETUP_DIR/python/setup-ccline.py" "Running setup-ccline.py..."
 run_setup_script "$SETUP_DIR/shell/setup-claude-plugins.sh" "Running setup-claude-plugins.sh..."
 
-# Configuration
-CLAUDE_SESSION="${CODEMATE_AGENT_SESSION:-claude-code-${CODEMATE_INSTANCE_ID:-default}}"
+printf "${GREEN}Starting CodeMate Claude Code...${RESET}\n"
 
-printf "${GREEN}Starting CodeMate with tmux...${RESET}\n"
+# Launch Claude Code directly on the container TTY. The initial query is passed
+# as a native initial prompt (positional argument), so no tmux session or
+# send-keys keystroke injection is needed.
+CLAUDE_CMD=(claude --dangerously-skip-permissions)
 
-# Function to check if a tmux session exists
-session_exists() {
-    tmux has-session -t "$1" 2>/dev/null
-}
-
-# Kill existing Claude session if it exists
-if session_exists "$CLAUDE_SESSION"; then
-    echo "Killing existing Claude Code session..."
-    tmux kill-session -t "$CLAUDE_SESSION"
-fi
-
-# Start Claude Code in a detached tmux session
-printf "${GREEN}Starting Claude Code in tmux session: $CLAUDE_SESSION${RESET}\n"
-
-CLAUDE_COMMAND="claude --dangerously-skip-permissions"
 if [ -n "$CODEMATE_CHAT" ]; then
     printf "${CYAN}Chat mode enabled; skipping CodeMate system prompt${RESET}\n"
 else
@@ -44,34 +31,19 @@ else
         printf "${CYAN}Using standard workflow system prompt${RESET}\n"
     fi
 
-    CLAUDE_COMMAND="$CLAUDE_COMMAND --append-system-prompt \"\$(cat $SYSTEM_PROMPT_FILE)\""
+    CLAUDE_CMD+=(--append-system-prompt "$(cat "$SYSTEM_PROMPT_FILE")")
 fi
 
-tmux new-session -d -s "$CLAUDE_SESSION" "$CLAUDE_COMMAND"
-
-# Send initial query if provided
+# Send the initial query natively if provided
 if [ -n "$CODEMATE_QUERY" ]; then
-    printf "${GREEN}Waiting for Claude to initialize...${RESET}\n"
-    sleep 5
-    printf "${GREEN}Sending initial query to Claude...${RESET}\n"
-
-    # Send command and verify submission with retry mechanism
-    send_and_verify_command "$CLAUDE_SESSION" "$CODEMATE_QUERY" 3
-else
-    sleep 2
+    printf "${GREEN}Starting Claude Code with the initial query...${RESET}\n"
+    CLAUDE_CMD+=("$CODEMATE_QUERY")
 fi
 
 # Display session information
-printf "${YELLOW}=== CodeMate Sessions ===${RESET}\n"
-echo "Claude Code session: $CLAUDE_SESSION (tmux)"
+printf "${YELLOW}=== CodeMate Session ===${RESET}\n"
+echo "Claude Code session started directly in this terminal"
 echo "PR Monitor: workspace Stop hook (10/30/60/120 second backoff)"
-echo ""
-printf "${YELLOW}=== Commands ===${RESET}\n"
-echo "List tmux sessions: tmux ls"
-echo "Kill Claude: tmux kill-session -t $CLAUDE_SESSION"
-echo ""
-printf "${GREEN}Attaching to Claude Code session...${RESET}\n"
-sleep 1
+echo "Detach: Ctrl+P Ctrl+Q · Re-attach: re-run codemate (docker attach)"
 
-# Attach to Claude Code session
-tmux attach -t "$CLAUDE_SESSION"
+exec "${CLAUDE_CMD[@]}"

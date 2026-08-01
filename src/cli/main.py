@@ -113,7 +113,6 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_CUSTOM_PLUGINS"),
     Field("CODEMATE_SOFT_LINKS"),
     Field("CODEMATE_REPO_DIR"),
-    Field("CODEMATE_AGENT_SESSION"),
     Field("CODEMATE_INSTANCE_ID"),
     Field("CODEMATE_RUNTIME_DIR"),
     Field("SLACK_WEBHOOK", secret=True),
@@ -484,7 +483,9 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     container_name = f"codemate-{sanitized(agent)}-{sanitized(repo)}-{sanitized(identity)}"
 
     if not args.dry_run and subprocess.run(["docker", "ps", "--format", "{{.Names}}"], text=True, stdout=subprocess.PIPE).stdout.splitlines().count(container_name):
-        return ["docker", "exec", "-it", container_name, "zsh"]
+        # The agent runs directly on the container TTY (no tmux), so re-running
+        # codemate re-attaches to the live session instead of opening a shell.
+        return ["docker", "attach", container_name]
 
     docker_params: List[str] = []
     if args.docker_param:

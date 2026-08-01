@@ -20,7 +20,7 @@ CodeMate solves this by running Claude Code in an isolated Docker container wher
 - Persistent home configuration through `CODEMATE_HOME` (default `~/.codemate`)
 - Built-in Claude Code skills for PR workflow automation
 - Slack and Lark notifications when Claude stops (via `SLACK_WEBHOOK` / `LARK_WEBHOOK`)
-- tmux session management with native Claude/Codex Stop-hook PR monitoring
+- Direct Claude/Codex session launch with native initial-prompt support and Stop-hook PR monitoring
 
 ## Quick Start
 
@@ -241,7 +241,6 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
-| `CODEMATE_AGENT_SESSION` | No | Override the tmux session name (defaults to an instance-scoped name) |
 | `CODEMATE_INSTANCE_ID` | No | Runtime instance namespace used to distinguish concurrent agent processes |
 | `CODEMATE_RUNTIME_DIR` | No | Override the root for session-scoped hook state (defaults to `$XDG_RUNTIME_DIR/codemate` or `/tmp/codemate-<uid>`) |
 | `CODEMATE_TMPDIR` | No | Per-agent temp root written into the container env (`/home/agent/.claude/tmp` for Claude, `/home/agent/.codex/tmp` for Codex); hooks derive their runtime root from it when `CODEMATE_RUNTIME_DIR` is unset |
@@ -272,7 +271,7 @@ On startup, the container:
 4. Checks out the specified branch or PR
 5. Creates a draft PR if working on a new branch (unless `--no-pr`, `--chat`, or fork workflow)
 6. Installs/updates plugins for the selected agent from configured marketplaces
-7. Starts Claude Code or Codex in the matching tmux session, appending CodeMate instructions unless chat mode is enabled
+7. Starts Claude Code or Codex directly with the initial query as a native initial prompt, appending CodeMate instructions unless chat mode is enabled
 8. Sends the initial query to the selected agent if `--query` is provided
 9. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
 

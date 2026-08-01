@@ -6,7 +6,6 @@ on:
       - '.github/workflows/docker-build.yml'
       - 'docker/Dockerfile'
       - 'docker/setup/**'
-      - 'docker/tmux.conf'
   push:
     branches:
       - main
