@@ -391,6 +391,182 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     assert len(call_log.read_text().splitlines()) == 3
 
 
+def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    codex_home = tmp_path / "codex-home"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    codex_home.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 47,
+                "url": "https://github.com/example/repo/pull/47",
+            }
+        )
+    )
+
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
+        "  printf '%s\\n' '{\"number\":47,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/47\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    history = codex_home / "history.jsonl"
+    history.write_text(json.dumps({"session_id": "pending-prompt-session", "ts": 100}) + "\n")
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEX_HOME": str(codex_home),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    stop = hook_input("pending-prompt-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    process = subprocess.Popen(
+        [str(HOOKS / "monitor_pr.sh")],
+        cwd=repo,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdin is not None
+    process.stdin.write(json.dumps(stop))
+    process.stdin.close()
+    process.stdin = None
+
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("monitor did not complete its immediate poll")
+
+        # The user submits a new prompt: history.jsonl is appended while the
+        # Stop hook is still running and the session status has NOT changed.
+        history.write_text(history.read_text() + json.dumps({"session_id": "pending-prompt-session", "ts": 200}) + "\n")
+        stdout, stderr = process.communicate(timeout=3)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=3)
+
+    assert process.returncode == 0
+    assert stdout == ""
+    assert stderr == ""
+    assert len(call_log.read_text().splitlines()) == 3
+
+
+def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    claude_home = tmp_path / "claude-home"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    claude_home.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 48,
+                "url": "https://github.com/example/repo/pull/48",
+            }
+        )
+    )
+
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
+        "  printf '%s\\n' '{\"number\":48,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/48\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    history = claude_home / "history.jsonl"
+    history.write_text(json.dumps({"sessionId": "pending-claude-session", "timestamp": 100000, "display": "first"}) + "\n")
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "claude",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CLAUDE_CONFIG_DIR": str(claude_home),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    stop = hook_input("pending-claude-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    process = subprocess.Popen(
+        [str(HOOKS / "monitor_pr.sh")],
+        cwd=repo,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdin is not None
+    process.stdin.write(json.dumps(stop))
+    process.stdin.close()
+    process.stdin = None
+
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("monitor did not complete its immediate poll")
+
+        history.write_text(history.read_text() + json.dumps({"sessionId": "pending-claude-session", "timestamp": 200000, "display": "second"}) + "\n")
+        stdout, stderr = process.communicate(timeout=3)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=3)
+
+    assert process.returncode == 0
+    assert stdout == ""
+    assert stderr == ""
+    assert len(call_log.read_text().splitlines()) == 3
+
+
 def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"

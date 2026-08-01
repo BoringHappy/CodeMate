@@ -405,7 +405,7 @@ codemate --branch issue-456 --query "Please use /issue:read-issue skill to read 
 
 CodeMate monitors PR feedback from the workspace plugin's native `Stop` hook. The first check runs immediately; later checks back off to 10, 30, 60, and then at most 120 seconds. No cron daemon or tmux prompt injection is used. Claude runs the poller as an `asyncRewake` hook so the UI remains interactive; Codex uses its synchronous Stop continuation contract because Codex does not currently run async command hooks.
 
-The hook verifies that its own session is still stopped and that the current worktree/branch still has an open PR before every `gh` call. If a user submits a new prompt, the in-flight monitor exits. When feedback is found, Claude is awakened through `asyncRewake`; Codex receives a structured Stop continuation decision. Both paths create a native agent turn.
+The hook verifies that its own session is still stopped and that the current worktree/branch still has an open PR before every `gh` call. It also watches the agent's prompt history (`$CODEX_HOME/history.jsonl` for Codex, `$CLAUDE_CONFIG_DIR/history.jsonl` for Claude): a new user prompt is recorded there the moment it is submitted, so even while Codex is still blocked running the Stop hook, the in-flight monitor notices within a second and exits, letting the new message resume the session without pressing Esc. When feedback is found, Claude is awakened through `asyncRewake`; Codex receives a structured Stop continuation decision. Both paths create a native agent turn.
 
 ### State Isolation
 

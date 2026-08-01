@@ -175,6 +175,60 @@ codemate_session_is_stopped() {
     fi
 }
 
+codemate_prompt_history_file() {
+    # Codex and Claude both record every user prompt in a history.jsonl:
+    # Codex uses $CODEX_HOME/history.jsonl and Claude uses
+    # $CLAUDE_CONFIG_DIR/history.jsonl. A new entry is appended as soon as the
+    # user submits a message, so Stop hooks can notice a pending prompt even
+    # while the agent session is still blocked finishing the previous turn.
+    local agent codex_file claude_file
+    codex_file="${CODEX_HOME:-${HOME:-}/.codex}/history.jsonl"
+    claude_file="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/history.jsonl"
+
+    agent=$(codemate_agent_name)
+    case "$agent" in
+        codex)
+            [ -f "$codex_file" ] && { printf '%s\n' "$codex_file"; return 0; }
+            ;;
+        claude)
+            [ -f "$claude_file" ] && { printf '%s\n' "$claude_file"; return 0; }
+            ;;
+    esac
+
+    # Plain CLI sessions may not set CODEMATE_AGENT; fall back to whichever
+    # history file exists so detection still works outside CodeMate.
+    [ -f "$codex_file" ] && { printf '%s\n' "$codex_file"; return 0; }
+    [ -f "$claude_file" ] && { printf '%s\n' "$claude_file"; return 0; }
+    return 1
+}
+
+# Prints the newest user-prompt timestamp recorded for a session, or 0 when
+# the agent keeps no readable prompt history. Codex timestamps are epoch
+# seconds; Claude uses epoch milliseconds.
+codemate_latest_prompt_ts() {
+    local session_id="$1" history_file latest
+    history_file=$(codemate_prompt_history_file) || { printf '0\n'; return 0; }
+    if codemate_is_codex; then
+        latest=$(jq -r --arg sid "$session_id" 'select(.session_id == $sid) | .ts' "$history_file" 2>/dev/null | tail -1) || true
+    else
+        latest=$(jq -r --arg sid "$session_id" 'select(.sessionId == $sid) | .timestamp' "$history_file" 2>/dev/null | tail -1) || true
+    fi
+    if [ -n "$latest" ] && [ "$latest" -ge 0 ] 2>/dev/null; then
+        printf '%s\n' "$latest"
+    else
+        printf '0\n'
+    fi
+    return 0
+}
+
+# Returns 0 when a user prompt newer than the baseline has been recorded for
+# the session, meaning the user is waiting and Stop hooks should stop polling.
+codemate_has_new_prompt() {
+    local session_id="$1" baseline_ts="$2" current_ts
+    current_ts=$(codemate_latest_prompt_ts "$session_id") || current_ts=0
+    [ "$current_ts" != "0" ] && [ "$current_ts" -gt "$baseline_ts" ] 2>/dev/null
+}
+
 codemate_truthy() {
     case "${1:-}" in
         1|true|TRUE|yes|YES|on|ON) return 0 ;;
