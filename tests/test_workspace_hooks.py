@@ -89,6 +89,28 @@ def test_session_state_is_isolated_by_agent_and_session(tmp_path: Path) -> None:
     }
 
 
+def test_session_state_uses_codemate_tmpdir_when_runtime_dir_unset(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codemate_tmp = tmp_path / "codemate-tmp"
+    repo.mkdir()
+    init_repo(repo)
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "claude",
+        "CODEMATE_TMPDIR": str(codemate_tmp),
+        "CODEMATE_NO_PR": "true",
+    }
+    env.pop("CODEMATE_RUNTIME_DIR", None)
+    env.pop("XDG_RUNTIME_DIR", None)
+    env.pop("TMPDIR", None)
+    run_hook("record_session_status.sh", hook_input("tmpdir-session", repo, "SessionStart"), cwd=repo, env=env)
+
+    statuses = list((codemate_tmp / "codemate" / "sessions").glob("*/status.json"))
+    assert len(statuses) == 1
+    payload = json.loads(statuses[0].read_text())
+    assert payload["session_id"] == "tmpdir-session"
+
+
 def test_stop_returns_native_continuation_and_scopes_retry_counter(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"

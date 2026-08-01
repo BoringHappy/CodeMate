@@ -300,9 +300,11 @@ def write_env_file(config: Mapping[str, ResolvedValue]) -> tempfile.NamedTempora
     # Keep each runtime's temp and hook state in its own config directory so
     # Codex and Claude can run concurrently on the same host without sharing
     # writable state (both config dirs are bind-mounted into every container).
+    # Use a CodeMate-scoped variable rather than overriding the global TMPDIR,
+    # which all processes in the container inherit and could be blocked by.
     agent = value(config, "CODEMATE_AGENT")
     tmp_dir = "/home/agent/.codex/tmp" if agent == "codex" else "/home/agent/.claude/tmp"
-    env_file.write(f"TMPDIR={tmp_dir}\n")
+    env_file.write(f"CODEMATE_TMPDIR={tmp_dir}\n")
     env_file.flush()
     return env_file
 

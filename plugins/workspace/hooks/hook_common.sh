@@ -10,6 +10,10 @@ codemate_runtime_root() {
 
     if [ -n "${CODEMATE_RUNTIME_DIR:-}" ]; then
         root="$CODEMATE_RUNTIME_DIR"
+    elif [ -n "${CODEMATE_TMPDIR:-}" ]; then
+        # CodeMate-scoped temp root (per agent), never the global TMPDIR that
+        # every process in the container inherits.
+        root="$CODEMATE_TMPDIR/codemate"
     elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
         root="$XDG_RUNTIME_DIR/codemate"
     else

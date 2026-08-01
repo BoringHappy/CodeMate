@@ -88,7 +88,7 @@ def test_docker_command_container_name_includes_agent(monkeypatch, tmp_path) -> 
     assert claude_cmd != codex_cmd
 
 
-def test_write_env_file_sets_agent_specific_tmpdir() -> None:
+def test_write_env_file_sets_agent_specific_codemate_tmpdir() -> None:
     for agent, expected in (
         ("claude", "/home/agent/.claude/tmp"),
         ("codex", "/home/agent/.codex/tmp"),
@@ -98,4 +98,5 @@ def test_write_env_file_sets_agent_specific_tmpdir() -> None:
             content = Path(env_file.name).read_text()
         finally:
             Path(env_file.name).unlink()
-        assert f"TMPDIR={expected}\n" in content
+        assert f"CODEMATE_TMPDIR={expected}\n" in content
+        assert not any(line.startswith("TMPDIR=") for line in content.splitlines())

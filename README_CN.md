@@ -272,6 +272,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_AGENT_SESSION` | 否 | 覆盖 tmux session 名称（默认使用 instance 级名称） |
 | `CODEMATE_INSTANCE_ID` | 否 | 区分同一主机或容器内并发 agent 进程的 runtime instance 名称 |
 | `CODEMATE_RUNTIME_DIR` | 否 | 覆盖 session 级 hook 状态根目录（默认 `$XDG_RUNTIME_DIR/codemate` 或 `/tmp/codemate-<uid>`） |
+| `CODEMATE_TMPDIR` | 否 | 写入容器 env 的每个 agent 专属临时目录（Claude 为 `/home/agent/.claude/tmp`，Codex 为 `/home/agent/.codex/tmp`）；未设置 `CODEMATE_RUNTIME_DIR` 时 hook 会由此派生 runtime root |
 | `CODEMATE_NO_PR` | 否 | 跳过 PR 创建和 branch push |
 | `CODEMATE_CHAT` | 否 | Chat 模式；会推导出 `CODEMATE_NO_PR=true` 并跳过 CodeMate system prompt 注入 |
 | `TZ` | 否 | 容器时区（默认：`UTC`；可通过 `--tz`、`.env` 或当前环境变量覆盖） |
@@ -383,7 +384,7 @@ CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第�
 - Session 状态按 runtime instance、agent 和 `session_id` 分目录保存；通知 commit baseline 和 retry counter 再按 Git worktree 和 branch 隔离。
 - PR 状态按 worktree 和 branch 保存在 `<absolute-git-dir>/codemate/pr-status/<branch>.json`，相邻的 monitor-state 和 lock 文件保存共享 cursor 与可中断 branch lease，保证同一个 PR event 只由一个已 Stop 的 session 处理。
 - Docker 容器名包含 runtime agent（`codemate-<agent>-<repo>-<branch>`），因此同一台机器上同一 repo/branch 的 Claude 与 Codex 会话可以并行运行，不会误连到对方的容器。
-- 每个 runtime 的可写状态放在各自配置目录下：Claude 的 `TMPDIR` 及派生出的 hook runtime root 是 `/home/agent/.claude/tmp`，Codex 是 `/home/agent/.codex/tmp`，避免两个 runtime 的临时文件和 session 状态共用一个位置。
+- 每个 runtime 的可写状态放在各自配置目录下：Claude 的 `CODEMATE_TMPDIR` 及派生出的 hook runtime root 是 `/home/agent/.claude/tmp`，Codex 是 `/home/agent/.codex/tmp`，避免两个 runtime 的临时文件和 session 状态共用一个位置。CodeMate 不会覆盖全局 `TMPDIR`，以免影响容器内其他进程。
 - 不再使用 `/tmp/.session_status`、`/tmp/.pr_status`、`/tmp/pr-monitor-state` 等全局共享文件。
 
 ### 评论类型

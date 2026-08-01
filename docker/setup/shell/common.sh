@@ -120,6 +120,8 @@ send_and_verify_command() {
 
     if [ -n "${CODEMATE_RUNTIME_DIR:-}" ]; then
         runtime_root="$CODEMATE_RUNTIME_DIR"
+    elif [ -n "${CODEMATE_TMPDIR:-}" ]; then
+        runtime_root="$CODEMATE_TMPDIR/codemate"
     elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
         runtime_root="$XDG_RUNTIME_DIR/codemate"
     else
@@ -169,5 +171,4 @@ send_and_verify_command() {
     printf "${YELLOW}Max retry attempts reached, continuing anyway${RESET}\n"
     return 0
 }
-
 

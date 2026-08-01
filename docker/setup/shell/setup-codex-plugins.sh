@@ -8,10 +8,11 @@ printf "${CYAN}Setting up Codex plugins...${RESET}\n"
 
 # Create tmp directory in .codex to avoid cross-device link errors and keep
 # Codex's temp/hook state out of Claude's config directory when both runtimes
-# share one host.
+# share one host. CODEMATE_TMPDIR (not TMPDIR) keeps CodeMate's own state
+# scoped without changing the temp directory of every process in the container.
 printf "  Creating temp directory at /home/agent/.codex/tmp\n"
 mkdir -p /home/agent/.codex/tmp
-export TMPDIR=/home/agent/.codex/tmp
+export CODEMATE_TMPDIR=/home/agent/.codex/tmp
 
 ALL_MARKETPLACES="${CODEMATE_DEFAULT_MARKETPLACES:-}"
 if [ -n "${CODEMATE_CUSTOM_MARKETPLACES:-}" ]; then
