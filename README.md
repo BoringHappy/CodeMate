@@ -244,6 +244,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_AGENT_SESSION` | No | Override the tmux session name (defaults to an instance-scoped name) |
 | `CODEMATE_INSTANCE_ID` | No | Runtime instance namespace used to distinguish concurrent agent processes |
 | `CODEMATE_RUNTIME_DIR` | No | Override the root for session-scoped hook state (defaults to `$XDG_RUNTIME_DIR/codemate` or `/tmp/codemate-<uid>`) |
+| `CODEMATE_TMPDIR` | No | Per-agent temp root written into the container env (`/home/agent/.claude/tmp` for Claude, `/home/agent/.codex/tmp` for Codex); hooks derive their runtime root from it when `CODEMATE_RUNTIME_DIR` is unset |
 | `CODEMATE_NO_PR` | No | Skip PR creation and branch push |
 | `CODEMATE_CHAT` | No | Chat mode; derives `CODEMATE_NO_PR=true` and skips CodeMate system prompt injection |
 | `TZ` | No | Container timezone (default: `UTC`; override with `--tz`, `.env`, or the ambient environment) |
@@ -411,6 +412,8 @@ The hook verifies that its own session is still stopped and that the current wor
 
 - Session status is keyed by runtime instance, agent, and `session_id`; notification commit baselines and retry counters are partitioned again by Git worktree and branch.
 - PR lifecycle state is stored at `<absolute-git-dir>/codemate/pr-status/<branch>.json`; adjacent monitor-state and lock files hold shared cursors and an interruptible branch lease, so only one stopped session handles a given PR event.
+- Docker container names include the runtime agent (`codemate-<agent>-<repo>-<branch>`), so Claude and Codex sessions for the same repository/branch can run concurrently on one machine without attaching to each other's container.
+- Each runtime keeps its own writable state under its own config directory: `CODEMATE_TMPDIR` and the derived hook runtime root are `/home/agent/.claude/tmp` for Claude and `/home/agent/.codex/tmp` for Codex, so temp files and session state never share a location across runtimes. CodeMate never overrides the global `TMPDIR`, which would affect every process in the container.
 - Fixed shared files such as `/tmp/.session_status`, `/tmp/.pr_status`, and `/tmp/pr-monitor-state` are not used.
 
 ### What Gets Monitored

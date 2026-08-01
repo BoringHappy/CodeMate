@@ -297,7 +297,14 @@ def write_env_file(config: Mapping[str, ResolvedValue]) -> tempfile.NamedTempora
         if "\n" in value_text:
             raise SystemExit(f"{key} contains a newline and cannot be written to a Docker env file")
         env_file.write(f"{key}={value_text}\n")
-    env_file.write("TMPDIR=/home/agent/.claude/tmp\n")
+    # Keep each runtime's temp and hook state in its own config directory so
+    # Codex and Claude can run concurrently on the same host without sharing
+    # writable state (both config dirs are bind-mounted into every container).
+    # Use a CodeMate-scoped variable rather than overriding the global TMPDIR,
+    # which all processes in the container inherit and could be blocked by.
+    agent = value(config, "CODEMATE_AGENT")
+    tmp_dir = "/home/agent/.codex/tmp" if agent == "codex" else "/home/agent/.claude/tmp"
+    env_file.write(f"CODEMATE_TMPDIR={tmp_dir}\n")
     env_file.flush()
     return env_file
 
@@ -469,7 +476,12 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     identity = value(config, "CODEMATE_BRANCH_NAME") or (
         f"pr-{value(config, 'CODEMATE_PR_NUMBER')}" if value(config, "CODEMATE_PR_NUMBER") else "main"
     )
-    container_name = f"codemate-{sanitized(repo)}-{sanitized(identity)}"
+    # The agent is part of the container name so Claude and Codex sessions for
+    # the same repository/branch can run side by side on one machine; without
+    # it, the second `docker run` would find the first agent's container and
+    # attach to the wrong runtime instead of starting its own.
+    agent = value(config, "CODEMATE_AGENT")
+    container_name = f"codemate-{sanitized(agent)}-{sanitized(repo)}-{sanitized(identity)}"
 
     if not args.dry_run and subprocess.run(["docker", "ps", "--format", "{{.Names}}"], text=True, stdout=subprocess.PIPE).stdout.splitlines().count(container_name):
         return ["docker", "exec", "-it", container_name, "zsh"]

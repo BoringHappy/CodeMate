@@ -12,6 +12,7 @@ def make_config(**overrides) -> dict:
         "CODEMATE_DOCKER_PARAMS": "",
         "CODEMATE_MOUNTS": "",
         "TZ": "UTC",
+        "CODEMATE_AGENT": "claude",
         "CODEMATE_IMAGE": "codemate:latest",
     }
     values.update(overrides)
@@ -65,3 +66,37 @@ def test_docker_command_mounts_custom_home(monkeypatch, tmp_path) -> None:
     assert f"{custom}:/home/agent/.codemate" in cmd
     assert f"{custom / '.claude'}:/home/agent/.claude" in cmd
     assert str(Path.home() / ".codemate") not in cmd
+
+
+def test_docker_command_container_name_includes_agent(monkeypatch, tmp_path) -> None:
+    custom = tmp_path / "codemate-home"
+    (custom / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("CODEMATE_HOME", str(custom))
+
+    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True)
+    claude_cmd = main.docker_command(
+        make_config(CODEMATE_BRANCH_NAME="feature/x"), args, "/tmp/codemate.env"
+    )
+    codex_cmd = main.docker_command(
+        make_config(CODEMATE_BRANCH_NAME="feature/x", CODEMATE_AGENT="codex"),
+        args,
+        "/tmp/codemate.env",
+    )
+
+    assert "codemate-claude-CodeMate-feature-x" in claude_cmd
+    assert "codemate-codex-CodeMate-feature-x" in codex_cmd
+    assert claude_cmd != codex_cmd
+
+
+def test_write_env_file_sets_agent_specific_codemate_tmpdir() -> None:
+    for agent, expected in (
+        ("claude", "/home/agent/.claude/tmp"),
+        ("codex", "/home/agent/.codex/tmp"),
+    ):
+        env_file = main.write_env_file(make_config(CODEMATE_AGENT=agent))
+        try:
+            content = Path(env_file.name).read_text()
+        finally:
+            Path(env_file.name).unlink()
+        assert f"CODEMATE_TMPDIR={expected}\n" in content
+        assert not any(line.startswith("TMPDIR=") for line in content.splitlines())
