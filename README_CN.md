@@ -20,7 +20,7 @@ CodeMate 通过在隔离的 Docker 容器中运行 Claude Code 来解决这个�
 - 持久化 Claude 配置
 - 内置 Claude Code Skills 用于 PR 工作流自动化
 - Slack 通知（当 Claude 停止时，需配置 `SLACK_WEBHOOK`）
-- tmux 会话管理，以及基于 Claude/Codex 原生 Stop hook 的 PR 评论监控
+- 直接启动 Claude/Codex 会话（原生 initial prompt），以及基于 Stop hook 的 PR 评论监控
 
 ## 快速开始
 
@@ -269,7 +269,6 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_HOME` | 否 | 宿主机上的 CodeMate home 目录；支持 `~` 和 `$VAR` 展开（默认：`~/.codemate`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
-| `CODEMATE_AGENT_SESSION` | 否 | 覆盖 tmux session 名称（默认使用 instance 级名称） |
 | `CODEMATE_INSTANCE_ID` | 否 | 区分同一主机或容器内并发 agent 进程的 runtime instance 名称 |
 | `CODEMATE_RUNTIME_DIR` | 否 | 覆盖 session 级 hook 状态根目录（默认 `$XDG_RUNTIME_DIR/codemate` 或 `/tmp/codemate-<uid>`） |
 | `CODEMATE_TMPDIR` | 否 | 写入容器 env 的每个 agent 专属临时目录（Claude 为 `/home/agent/.claude/tmp`，Codex 为 `/home/agent/.codex/tmp`）；未设置 `CODEMATE_RUNTIME_DIR` 时 hook 会由此派生 runtime root |
@@ -297,7 +296,7 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 1. clone/更新 repository 到 `/home/agent/<repo-name>`
 2. checkout 指定的 branch 或 PR
 3. 如果在新 branch 上工作，则创建 PR（除非使用 `--no-pr`、`--chat` 或 fork 工作流）
-4. 在对应的 tmux session 中启动 Claude Code 或 Codex；除非启用 chat 模式，否则会附加 CodeMate 指令
+4. 直接启动 Claude Code 或 Codex，把初始 query 作为原生 initial prompt 传入；除非启用 chat 模式，否则会附加 CodeMate 指令
 5. 如果提供了 `--query`，则向所选 agent 发送初始 query
 6. 在 agent 空闲时，通过 workspace 插件的 Stop hook 监控 PR 评论、CI 失败和 review-ready 状态
 
