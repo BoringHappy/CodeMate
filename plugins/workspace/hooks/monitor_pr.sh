@@ -21,6 +21,9 @@ LAST_CI_FAILURE_SIGNATURE=""
 CONSECUTIVE_FAILURES=0
 ACTION_MESSAGE=""
 MAX_POLLS=30
+SESSION_ID=""
+PROMPT_BASELINE_TS=0
+NEW_PROMPT_LOGGED=false
 
 log_monitor() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$MONITOR_LOG_FILE"
@@ -81,7 +84,15 @@ acquire_branch_monitor() {
 }
 
 session_can_poll() {
-    codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT"
+    codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || return 1
+    if codemate_has_new_prompt "$SESSION_ID" "$PROMPT_BASELINE_TS"; then
+        if [ "$NEW_PROMPT_LOGGED" != "true" ]; then
+            NEW_PROMPT_LOGGED=true
+            log_monitor "New user prompt detected; monitor exiting"
+        fi
+        return 1
+    fi
+    return 0
 }
 
 local_pr_can_poll() {
@@ -361,6 +372,10 @@ main() {
     else
         delays=(0 10 30 60 120)
     fi
+
+    SESSION_ID=$(codemate_session_id "$HOOK_INPUT") || exit 0
+    PROMPT_BASELINE_TS=$(codemate_latest_prompt_ts "$SESSION_ID")
+    NEW_PROMPT_LOGGED=false
 
     session_can_poll || exit 0
     codemate_load_pr_reference || exit 0
