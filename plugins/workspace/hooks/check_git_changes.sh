@@ -14,11 +14,7 @@ MAX_BLOCKS=2
 
 _git_changes_inject() {
     local instruction
-    if codemate_is_codex; then
-        instruction="the git:commit skill"
-    else
-        instruction="/git:commit"
-    fi
+    instruction=$(codemate_skill_phrase "$(codemate_commit_command)")
     jq -cn --arg reason "Uncommitted changes remain. Please use $instruction to commit and push them before stopping." \
         '{decision: "block", reason: $reason}'
 }

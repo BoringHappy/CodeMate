@@ -7,9 +7,9 @@ Agent-specific workflow names:
 - Claude: use commands named `/pr:get-details`, `/git:commit`, `/pr:fix-comments`, and `/pr:update`.
 
 1. **When starting a conversation (user's first message):**
-   - Check whether a PR already exists by resolving `CURRENT_BRANCH=$(git branch --show-current)` (use `detached-$(git rev-parse --short=12 HEAD)` when empty), then reading `$(git rev-parse --absolute-git-dir)/codemate/pr-status/$CURRENT_BRANCH.json` and confirming its JSON `state` is `open`.
-   - If a PR exists (the file is present and not empty), use the PR details workflow (`pr:get-details` in Codex, `/pr:get-details` in Claude) to fetch PR context.
-   - If no PR exists yet (the file is missing or empty), you are in PRE-PR phase:
+   - Check whether a PR already exists by resolving `CURRENT_BRANCH=$(git branch --show-current)` (use `detached-$(git rev-parse --short=12 HEAD)` when empty), then querying GitHub: `gh pr list --head "$CURRENT_BRANCH" --state open --json number -q '.[0].number'` (for fork workflows add `--repo <upstream>` and use `--head <fork-owner>:$CURRENT_BRANCH`).
+   - If a PR exists (the query returns a number), use the PR details workflow (`pr:get-details` in Codex, `/pr:get-details` in Claude) to fetch PR context.
+   - If no PR exists yet (the query returns nothing), you are in PRE-PR phase:
      * Focus on understanding the task or issue.
      * Make the necessary code changes.
      * Do not use PR-only workflows such as PR details, PR update, or PR comment-fixing until a PR exists.

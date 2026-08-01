@@ -7,6 +7,13 @@ description: Acknowledges new PR issue comments by adding an eye emoji (👀) re
 
 Adds a 👀 reaction to PR issue comments to indicate they have been seen and addressed.
 
+## Shared Contract
+
+The reaction used for acknowledgment is shared with the workspace monitor (see
+`docs/plugin-contracts.md`). The default is the `eyes` reaction (👀); deployments
+may override it with the `CODEMATE_ACK_REACTION` environment variable. The
+monitor skips comments that already carry the configured reaction.
+
 ## What it does
 
 1. **Fetches issue comments**: Gets all issue comments (pure PR comments) from the current pull request

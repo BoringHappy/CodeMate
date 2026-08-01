@@ -382,7 +382,7 @@ CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第�
 ### 状态隔离
 
 - Session 状态按 runtime instance、agent 和 `session_id` 分目录保存；通知 commit baseline 和 retry counter 再按 Git worktree 和 branch 隔离。
-- PR 状态按 worktree 和 branch 保存在 `<absolute-git-dir>/codemate/pr-status/<branch>.json`，相邻的 monitor-state 和 lock 文件保存共享 cursor 与可中断 branch lease，保证同一个 PR event 只由一个已 Stop 的 session 处理。
+- PR 状态通过 `pr` 插件的 query-first `pr-status` 接口实时从 GitHub 解析（GitHub 为事实来源），插件之间不再共享 PR-status 文件；pr 插件只在 runtime root 下保留私有缓存用于消歧，workspace 的 monitor-state 与 lock 文件保存共享 cursor 与可中断 branch lease（同样在 runtime root 下，不再写入 `.git`），保证同一个 PR event 只由一个已 Stop 的 session 处理。
 - Docker 容器名包含 runtime agent（`codemate-<agent>-<repo>-<branch>`），因此同一台机器上同一 repo/branch 的 Claude 与 Codex 会话可以并行运行，不会误连到对方的容器。
 - 每个 runtime 的可写状态放在各自配置目录下：Claude 的 `CODEMATE_TMPDIR` 及派生出的 hook runtime root 是 `/home/agent/.claude/tmp`，Codex 是 `/home/agent/.codex/tmp`，避免两个 runtime 的临时文件和 session 状态共用一个位置。CodeMate 不会覆盖全局 `TMPDIR`，以免影响容器内其他进程。
 - 不再使用 `/tmp/.session_status`、`/tmp/.pr_status`、`/tmp/pr-monitor-state` 等全局共享文件。
