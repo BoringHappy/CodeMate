@@ -1,0 +1,8 @@
+Stop-hook live verification sample
+===============================
+
+This file was created and pushed from the monitor-pr-to-hooks-test branch
+to verify the Codex Stop hook (plugins/workspace/hooks/stop.sh) fires
+correctly when the session stops.
+
+Created: 2026-08-01
