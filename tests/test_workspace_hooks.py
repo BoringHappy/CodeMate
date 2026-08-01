@@ -567,6 +567,110 @@ def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> Non
     assert len(call_log.read_text().splitlines()) == 3
 
 
+def test_monitor_checks_both_histories_when_runtime_is_unidentified(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    codex_home.mkdir()
+    claude_home.mkdir()
+    init_repo(repo)
+
+    status_file = repo / ".git" / "codemate" / "pr-status" / "feature" / "hooks.json"
+    status_file.parent.mkdir(parents=True)
+    status_file.write_text(
+        json.dumps(
+            {
+                "state": "open",
+                "branch": "feature/hooks",
+                "number": 49,
+                "url": "https://github.com/example/repo/pull/49",
+            }
+        )
+    )
+
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEMATE_TEST_GH_LOG\"\n"
+        "if [ \"$1 $2\" = \"pr view\" ]; then\n"
+        "  printf '%s\\n' '{\"number\":49,\"state\":\"OPEN\",\"url\":\"https://github.com/example/repo/pull/49\",\"isDraft\":true,\"labels\":[],\"statusCheckRollup\":[],\"headRefOid\":\"abc123\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"api\" ]; then exit 0; fi\n"
+        "exit 1\n"
+    )
+    fake_gh.chmod(0o755)
+
+    (codex_home / "history.jsonl").write_text(
+        json.dumps({"session_id": "dual-history-session", "ts": 100}) + "\n"
+    )
+    claude_history = claude_home / "history.jsonl"
+    claude_history.write_text(
+        json.dumps({"sessionId": "dual-history-session", "timestamp": 100000}) + "\n"
+    )
+
+    env = os.environ.copy() | {
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEX_HOME": str(codex_home),
+        "CLAUDE_CONFIG_DIR": str(claude_home),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_AGENT", None)
+    env.pop("CODEMATE_NO_PR", None)
+    env.pop("PLUGIN_ROOT", None)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+
+    stop = hook_input("dual-history-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    process = subprocess.Popen(
+        [str(HOOKS / "monitor_pr.sh")],
+        cwd=repo,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdin is not None
+    process.stdin.write(json.dumps(stop))
+    process.stdin.close()
+    process.stdin = None
+
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if call_log.exists() and len(call_log.read_text().splitlines()) == 3:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("monitor did not complete its immediate poll")
+
+        # Only Claude's history gains a newer entry; the unidentified runtime
+        # must consult both files rather than defaulting to Codex's.
+        claude_history.write_text(
+            claude_history.read_text()
+            + json.dumps({"sessionId": "dual-history-session", "timestamp": 200000})
+            + "\n"
+        )
+        stdout, stderr = process.communicate(timeout=3)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=3)
+
+    assert process.returncode == 0
+    assert stdout == ""
+    assert stderr == ""
+    assert len(call_log.read_text().splitlines()) == 3
+
+
 def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"

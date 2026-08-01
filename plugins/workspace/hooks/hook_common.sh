@@ -194,25 +194,49 @@ codemate_prompt_history_file() {
             [ -f "$claude_file" ] && { printf '%s\n' "$claude_file"; return 0; }
             ;;
     esac
+    return 1
+}
 
-    # Plain CLI sessions may not set CODEMATE_AGENT; fall back to whichever
-    # history file exists so detection still works outside CodeMate.
-    [ -f "$codex_file" ] && { printf '%s\n' "$codex_file"; return 0; }
-    [ -f "$claude_file" ] && { printf '%s\n' "$claude_file"; return 0; }
+# Returns 0 when the hook can tell which runtime it belongs to. CodeMate
+# containers export CODEMATE_AGENT; Codex hooks additionally set PLUGIN_ROOT
+# and Claude hooks set CLAUDE_PLUGIN_ROOT. Plain CLI sessions may set none of
+# them, in which case both histories are consulted below.
+codemate_runtime_is_identified() {
+    [ -n "${CODEMATE_AGENT:-}" ] && return 0
+    [ -n "${PLUGIN_ROOT:-}" ] && return 0
+    [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && return 0
     return 1
 }
 
 # Prints the newest user-prompt timestamp recorded for a session, or 0 when
 # the agent keeps no readable prompt history. Codex timestamps are epoch
-# seconds; Claude uses epoch milliseconds.
+# seconds; Claude uses epoch milliseconds. When the runtime cannot be
+# identified, both histories are checked so a machine with Codex and Claude
+# installed side by side never mistakes one runtime's prompts for the other's.
 codemate_latest_prompt_ts() {
-    local session_id="$1" history_file latest
-    history_file=$(codemate_prompt_history_file) || { printf '0\n'; return 0; }
-    if codemate_is_codex; then
-        latest=$(jq -r --arg sid "$session_id" 'select(.session_id == $sid) | .ts' "$history_file" 2>/dev/null | tail -1) || true
+    local session_id="$1" history_file latest ts codex_file claude_file
+    latest=""
+
+    if codemate_runtime_is_identified; then
+        history_file=$(codemate_prompt_history_file) || { printf '0\n'; return 0; }
+        if codemate_is_codex; then
+            latest=$(jq -r --arg sid "$session_id" 'select(.session_id == $sid) | .ts' "$history_file" 2>/dev/null | tail -1) || true
+        else
+            latest=$(jq -r --arg sid "$session_id" 'select(.sessionId == $sid) | .timestamp' "$history_file" 2>/dev/null | tail -1) || true
+        fi
     else
-        latest=$(jq -r --arg sid "$session_id" 'select(.sessionId == $sid) | .timestamp' "$history_file" 2>/dev/null | tail -1) || true
+        codex_file="${CODEX_HOME:-${HOME:-}/.codex}/history.jsonl"
+        claude_file="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/history.jsonl"
+        if [ -f "$codex_file" ]; then
+            ts=$(jq -r --arg sid "$session_id" 'select(.session_id == $sid) | .ts' "$codex_file" 2>/dev/null | tail -1) || true
+            [ -n "$ts" ] && [ "$ts" -gt "${latest:-0}" ] 2>/dev/null && latest="$ts"
+        fi
+        if [ -f "$claude_file" ]; then
+            ts=$(jq -r --arg sid "$session_id" 'select(.sessionId == $sid) | .timestamp' "$claude_file" 2>/dev/null | tail -1) || true
+            [ -n "$ts" ] && [ "$ts" -gt "${latest:-0}" ] 2>/dev/null && latest="$ts"
+        fi
     fi
+
     if [ -n "$latest" ] && [ "$latest" -ge 0 ] 2>/dev/null; then
         printf '%s\n' "$latest"
     else
