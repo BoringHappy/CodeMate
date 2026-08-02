@@ -15,7 +15,7 @@ printf "${GREEN}Starting CodeMate Codex...${RESET}\n"
 # native initial prompt (positional argument), so no tmux session is needed.
 # CodeMate already isolates Codex inside a disposable container, so Codex can
 # operate without a second sandbox or interactive approval prompts.
-CODEX_CMD=(codex --dangerously-bypass-approvals-and-sandbox)
+CODEX_CMD=(codex --yolo --dangerously-bypass-approvals-and-sandbox)
 
 if [ -n "$CODEMATE_CHAT" ]; then
     printf "${CYAN}Chat mode enabled; skipping CodeMate Codex instructions${RESET}\n"
