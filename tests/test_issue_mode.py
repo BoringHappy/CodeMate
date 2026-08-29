@@ -11,7 +11,6 @@ def test_run_codemate_validates_issue_before_deriving_branch(monkeypatch) -> Non
             "CODEMATE_BRANCH_NAME": "",
             "CODEMATE_PR_NUMBER": "",
             "CODEMATE_ISSUE_NUMBER": "21",
-            "CODEMATE_ALLOW_COUNTRY": "US",
             "CODEMATE_GITHUB_TOKEN": "token",
             "CODEMATE_GIT_USER_NAME": "CodeMate",
             "CODEMATE_GIT_USER_EMAIL": "codemate@example.com",

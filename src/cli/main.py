@@ -102,8 +102,6 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_GIT_USER_NAME", derived=git_user_name),
     Field("CODEMATE_GIT_USER_EMAIL", derived=git_user_email),
     Field("CODEMATE_CO_AUTHOR_BY", "co_author_by"),
-    Field("CODEMATE_ALLOW_COUNTRY"),
-    Field("CODEMATE_ALLOW_IP"),
     Field("CODEMATE_DOCKER_PARAMS", "docker_params", docker_export=False),
     Field("CODEMATE_MOUNTS", "mounts", docker_export=False),
     Field("TZ", "tz", default="UTC", docker_export=False),
@@ -253,12 +251,6 @@ def validate_config(config: Mapping[str, ResolvedValue]) -> None:
     if len(selected_targets) > 1:
         raise SystemExit("Specify only one target: " + ", ".join(selected_targets))
 
-    if not value(config, "CODEMATE_ALLOW_COUNTRY") and not value(config, "CODEMATE_ALLOW_IP"):
-        raise SystemExit(
-            "Neither CODEMATE_ALLOW_COUNTRY nor CODEMATE_ALLOW_IP is set. "
-            "Set at least one allowlist in .env, environment, or CLI-provided env."
-        )
-
     if not value(config, "CODEMATE_GITHUB_TOKEN"):
         raise SystemExit("CODEMATE_GITHUB_TOKEN is missing and gh auth token did not return a token.")
 
@@ -357,11 +349,6 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     custom_plugins = split_csv(value(config, "CODEMATE_CUSTOM_PLUGINS"))
     mounts = args.mount or split_words(value(config, "CODEMATE_MOUNTS"))
     docker_params = args.docker_param or split_words(value(config, "CODEMATE_DOCKER_PARAMS"))
-    allow_sources = [
-        label
-        for label, key in (("country", "CODEMATE_ALLOW_COUNTRY"), ("IP", "CODEMATE_ALLOW_IP"))
-        if value(config, key)
-    ]
     extra_env_keys = sorted(key for key, item in config.items() if item.field is None)
     docker_params_text = inline_detail_list(docker_params)
     extra_env_text = inline_detail_list(extra_env_keys)
@@ -387,7 +374,6 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_row("Custom mounts", detail_list(mounts))
     table.add_row("Docker params", docker_params_text)
     table.add_row("Extra envs", extra_env_text)
-    table.add_row("Allowlist", detail_list(allow_sources))
     console.print(table, crop=False)
 
 
@@ -439,9 +425,6 @@ def create_setup_files(cwd: Path) -> None:
             "# CODEMATE_CHAT=\n\n"
             "# Container timezone (defaults to UTC)\n"
             "# TZ=UTC\n\n"
-            "# Access control. Set at least one allowlist.\n"
-            "CODEMATE_ALLOW_COUNTRY=\n"
-            "CODEMATE_ALLOW_IP=\n"
         )
     typer.secho("+ Setup complete", fg=typer.colors.GREEN)
 

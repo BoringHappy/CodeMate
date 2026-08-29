@@ -37,17 +37,9 @@ Parameters:
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
-6. `setup/setup.sh` enforces the region restriction before any other setup. `CODEMATE_ALLOW_IP` takes precedence over `CODEMATE_ALLOW_COUNTRY`; failed checks file a GitHub issue and stop startup.
-7. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. PR monitoring runs from the workspace plugin's native Stop hook.
+6. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. PR monitoring runs from the workspace plugin's native Stop hook.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
-
-### Required Environment Variables
-
-- `CODEMATE_ALLOW_COUNTRY` — comma-separated ip-api.com `countryCode` values (e.g. `US,CA`).
-- `CODEMATE_ALLOW_IP` — comma-separated exact IPs or IPv4 CIDR ranges (e.g. `203.0.113.7,198.51.100.0/24`).
-
-At least **one** of `CODEMATE_ALLOW_COUNTRY` / `CODEMATE_ALLOW_IP` must be set; the CLI refuses to start the container otherwise. The container enforces the check at startup using a single ip-api.com response for the detected IP, country, region, and timezone. `CODEMATE_ALLOW_IP` takes precedence when both allowlists are configured; `CODEMATE_ALLOW_COUNTRY` is consulted solely when `CODEMATE_ALLOW_IP` is unset. The returned timezone must match `TZ`; a mismatch files a GitHub issue and stops startup.
 
 ### Plugin Marketplace
 
