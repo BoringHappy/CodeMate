@@ -88,6 +88,21 @@ def test_docker_command_container_name_includes_agent(monkeypatch, tmp_path) -> 
     assert claude_cmd != codex_cmd
 
 
+def test_docker_command_skip_pull(monkeypatch, tmp_path) -> None:
+    custom = tmp_path / "codemate-home"
+    (custom / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("CODEMATE_HOME", str(custom))
+
+    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True)
+    default_cmd = main.docker_command(make_config(), args, "/tmp/codemate.env")
+    skip_cmd = main.docker_command(
+        make_config(CODEMATE_SKIP_PULL="true"), args, "/tmp/codemate.env"
+    )
+
+    assert default_cmd[default_cmd.index("--pull") + 1] == "always"
+    assert skip_cmd[skip_cmd.index("--pull") + 1] == "missing"
+
+
 def test_write_env_file_sets_agent_specific_codemate_tmpdir() -> None:
     for agent, expected in (
         ("claude", "/home/agent/.claude/tmp"),

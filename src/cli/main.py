@@ -104,6 +104,7 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_CO_AUTHOR_BY", "co_author_by"),
     Field("CODEMATE_DOCKER_PARAMS", "docker_params", docker_export=False),
     Field("CODEMATE_MOUNTS", "mounts", docker_export=False),
+    Field("CODEMATE_SKIP_PULL", "skip_pull", docker_export=False),
     Field("TZ", "tz", default="UTC", docker_export=False),
     Field("CODEMATE_DEFAULT_MARKETPLACES", default=DEFAULT_MARKETPLACES, allow_empty_override=True),
     Field("CODEMATE_DEFAULT_PLUGINS", default=DEFAULT_PLUGINS, allow_empty_override=True),
@@ -362,6 +363,8 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_row("Home dir", str(codemate_home()))
     if value(config, "CODEMATE_CHAT"):
         table.add_row("Chat mode", "enabled")
+    if value(config, "CODEMATE_SKIP_PULL"):
+        table.add_row("Image pull", "skipped")
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
     table.add_row("Timezone", value(config, "TZ"))
@@ -423,6 +426,8 @@ def create_setup_files(cwd: Path) -> None:
             "# CODEMATE_CO_AUTHOR_BY=Name <email@example.com>\n\n"
             "# Optional chat mode: skips PR creation and CodeMate system prompt injection\n"
             "# CODEMATE_CHAT=\n\n"
+            "# Optional: skip pulling the Docker image at startup (pull only if missing locally)\n"
+            "# CODEMATE_SKIP_PULL=true\n\n"
             "# Container timezone (defaults to UTC)\n"
             "# TZ=UTC\n\n"
         )
@@ -489,14 +494,17 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     for mount in mounts:
         volume_args.extend(["-v", mount])
 
+    pull_args: List[str] = (
+        ["--pull", "missing"] if value(config, "CODEMATE_SKIP_PULL") else ["--pull", "always"]
+    )
+
     return [
         "docker",
         "run",
         "--rm",
         "--name",
         container_name,
-        "--pull",
-        "always",
+        *pull_args,
         *network_args,
         *docker_params,
         "-it",
@@ -580,6 +588,11 @@ def cli(
     upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
     mount: List[str] = typer.Option([], "--mount", help="Custom volume mount."),
     image: Optional[str] = typer.Option(None, "--image", help=f"Docker image to use. Default: {DEFAULT_IMAGE}"),
+    skip_pull: bool = typer.Option(
+        False,
+        "--skip-pull",
+        help="Skip pulling the image at startup; pull only if it is missing locally.",
+    ),
     tz: Optional[str] = typer.Option(None, "--tz", help="Container timezone. Default: UTC"),
     build_image_flag: bool = typer.Option(False, "--build", help="Build Docker image from local Dockerfile."),
     dockerfile: str = typer.Option("docker/Dockerfile", "-f", "--dockerfile", help="Path to Dockerfile."),
@@ -606,6 +619,7 @@ def cli(
         upstream=upstream,
         mount=mount,
         image=image,
+        skip_pull=skip_pull,
         tz=tz,
         build=build_image_flag,
         dockerfile=dockerfile,
