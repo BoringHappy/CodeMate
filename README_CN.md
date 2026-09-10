@@ -110,6 +110,9 @@ codemate --branch feature/xyz --no-pr
 # Chat 模式会跳过 PR 创建和 CodeMate system prompt 注入
 codemate --branch feature/xyz --chat
 
+# 不启动 agent，直接在容器里打开一个交互式 zsh
+codemate --branch feature/xyz --shell
+
 # 使用自定义卷挂载运行（可选）
 codemate --branch feature/xyz --mount ~/data:/data
 
@@ -289,7 +292,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
 | `CODEMATE_SOFT_LINKS` | 否 | 逗号分隔的 `source:destination` 软链接配置（例如：`/data/models:/home/agent/models,/data/cache:/home/agent/.cache`） |
 
-`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR`、`CODEMATE_CHAT`、`CODEMATE_SKIP_PULL` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --chat` 可跳过 PR 创建和 CodeMate system prompt 注入；使用 `codemate --skip-pull` 可跳过启动时的镜像拉取、直接使用本地缓存的镜像；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR`、`CODEMATE_CHAT`、`CODEMATE_SKIP_PULL` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --chat` 可跳过 PR 创建和 CodeMate system prompt 注入；使用 `codemate --shell` 可执行同样的容器初始化流程，但不启动 agent，而是直接进入交互式 zsh；使用 `codemate --skip-pull` 可跳过启动时的镜像拉取、直接使用本地缓存的镜像；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
 
 
 ## 工作原理
@@ -303,6 +306,8 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 4. 直接启动 Claude Code 或 Codex，把初始 query 作为原生 initial prompt 传入；除非启用 chat 模式，否则会附加 CodeMate 指令
 5. 如果提供了 `--query`，则向所选 agent 发送初始 query
 6. 在 agent 空闲时，通过 workspace 插件的 Stop hook 监控 PR 评论、CI 失败和 review-ready 状态
+
+使用 `--shell` 时，容器完成上述仓库初始化后直接打开交互式 zsh，不安装 agent 插件，也不启动 Claude Code 或 Codex。
 
 ## Skills
 

@@ -363,6 +363,8 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     table.add_row("Home dir", str(codemate_home()))
     if value(config, "CODEMATE_CHAT"):
         table.add_row("Chat mode", "enabled")
+    if args.shell:
+        table.add_row("Shell mode", "enabled")
     if value(config, "CODEMATE_SKIP_PULL"):
         table.add_row("Image pull", "skipped")
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
@@ -468,11 +470,16 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     # it, the second `docker run` would find the first agent's container and
     # attach to the wrong runtime instead of starting its own.
     agent = value(config, "CODEMATE_AGENT")
+    if args.shell:
+        # Shell sessions get their own runtime name so they never collide with,
+        # or get attached to by, an agent working the same repository/branch.
+        agent = "shell"
     container_name = f"codemate-{sanitized(agent)}-{sanitized(repo)}-{sanitized(identity)}"
 
     if not args.dry_run and subprocess.run(["docker", "ps", "--format", "{{.Names}}"], text=True, stdout=subprocess.PIPE).stdout.splitlines().count(container_name):
         # The agent runs directly on the container TTY (no tmux), so re-running
         # codemate re-attaches to the live session instead of opening a shell.
+        # Shell sessions follow the same rule: re-running re-attaches to zsh.
         return ["docker", "attach", container_name]
 
     docker_params: List[str] = []
@@ -498,7 +505,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         ["--pull", "missing"] if value(config, "CODEMATE_SKIP_PULL") else ["--pull", "always"]
     )
 
-    return [
+    command = [
         "docker",
         "run",
         "--rm",
@@ -517,6 +524,12 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         f"/home/agent/{repo}",
         value(config, "CODEMATE_IMAGE"),
     ]
+    if args.shell:
+        # setup.sh ends with `exec "$@"`, so a trailing command replaces the
+        # image's default CMD (run.sh) and drops into zsh once the setup
+        # scripts finished.
+        command.append("zsh")
+    return command
 
 
 def print_config(config: Mapping[str, ResolvedValue]) -> None:
@@ -533,6 +546,8 @@ def run_codemate(args: SimpleNamespace) -> None:
     if args.update:
         print("Installed with uv tool. Update with: uv tool upgrade codemate-cli")
         return
+    if args.shell and args.query:
+        raise SystemExit("--shell opens an interactive zsh session; remove --query.")
 
     ensure_global_config()
     config = resolve_config(args, cwd)
@@ -583,6 +598,7 @@ def cli(
     co_author_by: Optional[str] = typer.Option(None, "--co-author-by", help="Commit co-author, e.g. 'Name <email@example.com>'."),
     no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push."),
     chat: bool = typer.Option(False, "--chat", help="Run in chat mode: skip PR creation and CodeMate system prompt injection."),
+    shell: bool = typer.Option(False, "--shell", help="Open an interactive zsh shell in the container instead of launching the agent."),
     docker_param: List[str] = typer.Option([], "--docker-param", help="Extra Docker run parameter."),
     repo: Optional[str] = typer.Option(None, "--repo", help="Git repository URL."),
     upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
@@ -614,6 +630,7 @@ def cli(
         co_author_by=co_author_by,
         no_pr=no_pr,
         chat=chat,
+        shell=shell,
         docker_param=docker_param,
         repo=repo,
         upstream=upstream,
