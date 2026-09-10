@@ -23,6 +23,8 @@ def test_run_codemate_validates_issue_before_deriving_branch(monkeypatch) -> Non
         build=False,
         config=False,
         dry_run=True,
+        shell=False,
+        query=None,
     )
 
     monkeypatch.setattr(main, "ensure_global_config", lambda: None)

@@ -60,7 +60,7 @@ def test_docker_command_mounts_custom_home(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CODEMATE_HOME", str(custom))
 
     config = make_config()
-    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True)
+    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True, shell=False)
     cmd = main.docker_command(config, args, "/tmp/codemate.env")
 
     assert f"{custom}:/home/agent/.codemate" in cmd
@@ -73,7 +73,7 @@ def test_docker_command_container_name_includes_agent(monkeypatch, tmp_path) -> 
     (custom / ".claude").mkdir(parents=True)
     monkeypatch.setenv("CODEMATE_HOME", str(custom))
 
-    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True)
+    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True, shell=False)
     claude_cmd = main.docker_command(
         make_config(CODEMATE_BRANCH_NAME="feature/x"), args, "/tmp/codemate.env"
     )
@@ -93,7 +93,7 @@ def test_docker_command_skip_pull(monkeypatch, tmp_path) -> None:
     (custom / ".claude").mkdir(parents=True)
     monkeypatch.setenv("CODEMATE_HOME", str(custom))
 
-    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True)
+    args = SimpleNamespace(mount=[], docker_param=[], dry_run=True, shell=False)
     default_cmd = main.docker_command(make_config(), args, "/tmp/codemate.env")
     skip_cmd = main.docker_command(
         make_config(CODEMATE_SKIP_PULL="true"), args, "/tmp/codemate.env"
