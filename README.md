@@ -225,23 +225,19 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 **Preinstalled Browser Automation:**
 
-The base image ships [Playwright](https://playwright.dev/) with Chromium and its system dependencies, so browser automation works out of the box:
+The base image ships the [Playwright](https://playwright.dev/) CLI, so browser automation needs no extra tooling. Browsers are not bundled — download the ones your project needs on demand:
 
 ```bash
 playwright --version
+playwright install chromium                  # add firefox / webkit as needed
 playwright screenshot "https://example.com" /tmp/page.png
 npx playwright test
 ```
 
-Browsers are installed image-wide at `/ms-playwright` (via the `PLAYWRIGHT_BROWSERS_PATH` environment variable) instead of a per-user cache, so they are shared by every user and survive across containers. To add Firefox or WebKit, extend the base image:
+Browsers are downloaded into the current user's cache (`~/.cache/ms-playwright`) and need no elevated privileges. If a browser fails to launch because system libraries are missing, install the OS dependencies once:
 
-```dockerfile
-FROM ghcr.io/boringhappy/codemate:latest
-
-# Browsers are installed to /ms-playwright, which is owned by root
-USER root
-RUN playwright install --with-deps firefox \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+```bash
+sudo "$(command -v playwright)" install-deps chromium
 ```
 
 ## Environment Variables
