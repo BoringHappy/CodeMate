@@ -513,18 +513,15 @@ def chat_defaults(config: Dict[str, ResolvedValue]) -> None:
         config["CODEMATE_NO_PR"] = ResolvedValue("true", "chat", FIELD_BY_NAME["CODEMATE_NO_PR"])
 
 
-def codemate_volume_args(home: Path, include_home: bool = True) -> List[str]:
-    """Mount a CodeMate home plus each top-level entry inside it.
+def home_entry_volume_args(home: Path) -> List[str]:
+    """Mount each top-level entry of a CodeMate home at the matching path in $HOME.
 
-    Mounting the entries individually keeps ~/.claude, ~/.codex, and similar
-    agent state directories available inside the container with their natural
-    paths. Standard mode also mounts the home directory itself so ~/.codemate
-    stays browsable; pure mode mounts only the entries.
+    This keeps ~/.claude, ~/.codex, and similar agent state directories
+    available inside the container with their natural paths. The home
+    directory itself is mounted by the standard image only.
     """
     home.mkdir(parents=True, exist_ok=True)
     volume_args: List[str] = []
-    if include_home:
-        volume_args.extend(["-v", f"{home}:/home/agent/.codemate"])
     for entry in sorted(home.iterdir()):
         volume_args.extend(["-v", f"{entry}:/home/agent/{entry.name}"])
     return volume_args
@@ -639,7 +636,9 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         return attach
 
     docker_params = resolved_docker_params(config, args)
-    volume_args = codemate_volume_args(codemate_home())
+    codemate_dir = codemate_home()
+    volume_args = ["-v", f"{codemate_dir}:/home/agent/.codemate"]
+    volume_args.extend(home_entry_volume_args(codemate_dir))
     if Path("skills").is_dir():
         volume_args.extend(["-v", f"{Path.cwd() / 'skills'}:/home/agent/.claude/skills"])
     volume_args.extend(custom_mount_args(config, args))
@@ -705,7 +704,7 @@ def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespa
         return attach
 
     docker_params = resolved_docker_params(config, args)
-    volume_args = codemate_volume_args(ensure_pure_home(), include_home=False)
+    volume_args = home_entry_volume_args(ensure_pure_home())
     volume_args.extend(["-v", f"{Path.cwd()}:/home/agent/{workspace}"])
     volume_args.extend(custom_mount_args(config, args))
 
