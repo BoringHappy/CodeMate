@@ -30,7 +30,7 @@ Parameters:
 - `--branch` - Branch to work on
 - `--pr` - Existing PR number (alternative to --branch)
 - `--mount` - Additional volume mounts (can be specified multiple times)
-- `--pure` - Run the pure image with the pure CodeMate home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`, separate from the standard `CODEMATE_HOME`) and current directory mounted, starting zsh instead of running setup (no target, GitHub token, or host `git`/`gh` required)
+- `--pure` - Run the pure image with the entries of the pure CodeMate home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`, separate from the standard `CODEMATE_HOME`) and the current directory mounted, starting zsh instead of running setup (no target, GitHub token, or host `git`/`gh` required)
 
 ## Architecture
 

@@ -72,7 +72,7 @@ def test_pure_mode_mounts_a_separate_home(codemate_home, tmp_path, monkeypatch) 
     cmd = main.pure_docker_command(make_config(), make_args(), "/tmp/codemate.env")
 
     pure = Path(f"{codemate_home}-pure")
-    assert f"{pure}:/home/agent/.codemate" in cmd
+    assert f"{pure}:/home/agent/.codemate" not in cmd
     assert f"{codemate_home}:/home/agent/.codemate" not in cmd
     assert f"{pure / '.claude'}:/home/agent/.claude" in cmd
     assert f"{pure / '.claude.json'}:/home/agent/.claude.json" in cmd
