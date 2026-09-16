@@ -94,9 +94,13 @@ RUN set -euxo pipefail \
 # Install the Playwright CLI, without any browser binaries
 # Browsers are downloaded on demand (`playwright install <browser>`), which keeps
 # the image small and lets each project pick only the browsers it needs
+# This install runs as root, so hand the shared npm prefix back to the agent
+# user afterwards; otherwise later `npm install -g` runs as agent fail with
+# EACCES on lib/node_modules.
 RUN set -euxo pipefail \
     && npm install -g playwright \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && chown -R agent:agent /usr/local/share/npm-global
 
 # Switch to agent user for user-specific installations
 USER agent

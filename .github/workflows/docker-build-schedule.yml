@@ -17,10 +17,12 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'docker-build.yml',
-              ref: 'main'
-            });
-            console.log('Triggered scheduled CodeMate image rebuild');
+            for (const workflow_id of ['docker-build.yml', 'docker-build-pure.yml']) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id,
+                ref: 'main'
+              });
+              console.log(`Triggered scheduled rebuild: ${workflow_id}`);
+            }

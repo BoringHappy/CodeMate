@@ -20,6 +20,9 @@ codemate --pr 123
 
 # Run with custom volume mounts
 codemate --branch feature/xyz --mount /local/path:/container/path
+
+# Pure mode: no repository setup, no GitHub, no plugins - just zsh with ~/.codemate mounted
+codemate --pure
 ```
 
 Parameters:
@@ -27,6 +30,7 @@ Parameters:
 - `--branch` - Branch to work on
 - `--pr` - Existing PR number (alternative to --branch)
 - `--mount` - Additional volume mounts (can be specified multiple times)
+- `--pure` - Run the pure image with the entries of the pure CodeMate home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`, separate from the standard `CODEMATE_HOME`) and the current directory mounted, starting zsh instead of running setup (no target, GitHub token, or host `git`/`gh` required)
 
 ## Architecture
 
@@ -114,6 +118,7 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 ### Key Files
 
 - `docker/Dockerfile` - Combined Claude Code and Codex container definition, using the `codemate-base` image
+- `docker/Dockerfile.pure` - Pure image: Claude Code and Codex in a plain zsh container with no setup entrypoint, plugins, or launcher; `CMD ["zsh"]`
 - `docker/Dockerfile.base` - Base image with system packages and development tools
 - `docker/setup/` - Container setup scripts (copied into container at build time)
 - `src/cli/main.py` - Python CLI entry point for running CodeMate with configuration management
@@ -123,5 +128,6 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 
 - No test suite exists - this is infrastructure/tooling
 - GitHub Actions workflow (`docker-build.yml`) builds and pushes the combined image to GHCR on main branch and tags
+- GitHub Actions workflow (`docker-build-pure.yml`) builds and pushes the pure image (`codemate-pure`) on main branch, and smoke tests it on pull requests
 - GitHub Actions workflow (`docker-build-schedule.yml`) triggers a rebuild every day at 05:00 UTC
 - Docker image builds: linux/amd64

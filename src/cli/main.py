@@ -20,6 +20,13 @@ from rich.table import Table
 
 
 DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
+DEFAULT_PURE_IMAGE = "ghcr.io/boringhappy/codemate-pure:latest"
+DEFAULT_DOCKERFILE = "docker/Dockerfile"
+DEFAULT_PURE_DOCKERFILE = "docker/Dockerfile.pure"
+DEFAULT_TAG = "codemate:local"
+DEFAULT_PURE_TAG = "codemate-pure:local"
+# Docker flags that take a value and therefore must not be passed alone.
+DOCKER_VALUE_FLAGS = ("--network",)
 DEFAULT_MARKETPLACES = "BoringHappy/CodeMate"
 DEFAULT_PLUGINS = "git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
@@ -69,6 +76,49 @@ def codemate_home() -> Path:
     """
     raw = os.environ.get("CODEMATE_HOME") or str(Path.home() / ".codemate")
     return Path(os.path.expanduser(os.path.expandvars(raw)))
+
+
+def pure_home() -> Path:
+    """Resolve the CodeMate home used by pure mode.
+
+    Pure sessions get their own home so they never read or write the standard
+    CodeMate home's agent credentials and plugin state. Defaults to the
+    standard home with a ``-pure`` suffix (``~/.codemate-pure``), so a custom
+    CODEMATE_HOME keeps its sibling; CODEMATE_PURE_HOME overrides it entirely.
+    """
+    raw = os.environ.get("CODEMATE_PURE_HOME")
+    if raw:
+        return Path(os.path.expanduser(os.path.expandvars(raw)))
+    base = codemate_home()
+    if base.name:
+        return Path(f"{base}-pure")
+    return base / "codemate-pure"
+
+
+def ensure_pure_home() -> Path:
+    """Create the pure home plus the agent state entries mounted into $HOME.
+
+    Seeding ~/.claude, ~/.claude.json, and ~/.codex means the first login or
+    config write inside a pure container lands in the pure home instead of the
+    container's throwaway filesystem.
+    """
+    home = pure_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".codex").mkdir(exist_ok=True)
+    claude_json = home / ".claude.json"
+    if not claude_json.exists():
+        claude_json.write_text("{}\n")
+    return home
+
+
+def is_pure(args: SimpleNamespace) -> bool:
+    """Pure mode: no repository setup, no plugins, just a zsh shell.
+
+    ``getattr`` keeps the helper usable with the lightweight argument objects
+    the tests build.
+    """
+    return bool(getattr(args, "pure", False))
 
 
 def git_remote() -> str:
@@ -349,7 +399,7 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     default_plugins = split_csv(value(config, "CODEMATE_DEFAULT_PLUGINS"))
     custom_plugins = split_csv(value(config, "CODEMATE_CUSTOM_PLUGINS"))
     mounts = args.mount or split_words(value(config, "CODEMATE_MOUNTS"))
-    docker_params = args.docker_param or split_words(value(config, "CODEMATE_DOCKER_PARAMS"))
+    docker_params = resolved_docker_params(config, args)
     extra_env_keys = sorted(key for key, item in config.items() if item.field is None)
     docker_params_text = inline_detail_list(docker_params)
     extra_env_text = inline_detail_list(extra_env_keys)
@@ -382,8 +432,11 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     console.print(table, crop=False)
 
 
-def check_prerequisites(config: Mapping[str, ResolvedValue]) -> None:
-    missing = [name for name in ("docker", "git", "gh") if shutil.which(name) is None]
+def check_prerequisites(config: Mapping[str, ResolvedValue], pure: bool = False) -> None:
+    # Pure mode never touches GitHub or clones a repository, so git and gh are
+    # not required on the host.
+    required = ("docker",) if pure else ("docker", "git", "gh")
+    missing = [name for name in required if shutil.which(name) is None]
     if missing:
         raise SystemExit("Missing required dependencies: " + ", ".join(missing))
 
@@ -460,6 +513,105 @@ def chat_defaults(config: Dict[str, ResolvedValue]) -> None:
         config["CODEMATE_NO_PR"] = ResolvedValue("true", "chat", FIELD_BY_NAME["CODEMATE_NO_PR"])
 
 
+def home_entry_volume_args(home: Path) -> List[str]:
+    """Mount each top-level entry of a CodeMate home at the matching path in $HOME.
+
+    This keeps ~/.claude, ~/.codex, and similar agent state directories
+    available inside the container with their natural paths. The home
+    directory itself is mounted by the standard image only.
+    """
+    home.mkdir(parents=True, exist_ok=True)
+    volume_args: List[str] = []
+    for entry in sorted(home.iterdir()):
+        volume_args.extend(["-v", f"{entry}:/home/agent/{entry.name}"])
+    return volume_args
+
+
+def custom_mount_args(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> List[str]:
+    mount_args: List[str] = []
+    for mount in args.mount or split_words(value(config, "CODEMATE_MOUNTS")):
+        mount_args.extend(["-v", mount])
+    return mount_args
+
+
+def validate_docker_params(params: Sequence[str]) -> None:
+    """Reject Docker flags that take a value but were given none.
+
+    ``--network`` needs a value, so a trailing ``--network`` would fail inside
+    Docker with a confusing message. ``--docker-param --network host`` is also
+    wrong, because the CLI consumes ``--network`` as the option value and
+    treats ``host`` as an extra argument; pass the pair as one quoted string
+    (``--docker-param "--network host"``) or use ``--network host``.
+    """
+    for index, param in enumerate(params):
+        if param in DOCKER_VALUE_FLAGS and index == len(params) - 1:
+            raise SystemExit(
+                f"Docker parameter {param} needs a value. Use --network <mode> "
+                f'or --docker-param "{param} <value>".'
+            )
+
+
+def strip_network_params(params: Sequence[str]) -> List[str]:
+    """Drop ``--network <mode>`` / ``--network=<mode>`` pairs from a parameter list."""
+    kept: List[str] = []
+    skip_next = False
+    for param in params:
+        if skip_next:
+            skip_next = False
+            continue
+        if param == "--network":
+            skip_next = True
+            continue
+        if param.startswith("--network="):
+            continue
+        kept.append(param)
+    return kept
+
+
+def resolved_docker_params(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> List[str]:
+    if args.docker_param:
+        params: List[str] = []
+        for param in args.docker_param:
+            params.extend(split_words(param))
+    else:
+        params = split_words(value(config, "CODEMATE_DOCKER_PARAMS"))
+
+    # An explicit --network wins over one embedded in the Docker parameters.
+    network = getattr(args, "network", None)
+    if network:
+        params = strip_network_params(params)
+        params.extend(["--network", network])
+
+    validate_docker_params(params)
+    return params
+
+
+def network_args(docker_params: Sequence[str]) -> List[str]:
+    """Share the host network on Linux so agents can reach local services."""
+    has_network = "--network" in docker_params or any(param.startswith("--network=") for param in docker_params)
+    if has_network or sys.platform == "darwin":
+        return []
+    return ["--network", "host"]
+
+
+def pull_args(config: Mapping[str, ResolvedValue]) -> List[str]:
+    return ["--pull", "missing"] if value(config, "CODEMATE_SKIP_PULL") else ["--pull", "always"]
+
+
+def attach_if_running(container_name: str, args: SimpleNamespace) -> Optional[List[str]]:
+    """Re-attach to a live session with the same container name.
+
+    The agent runs directly on the container TTY (no tmux), so re-running
+    codemate re-attaches to the live session instead of opening a shell.
+    """
+    if getattr(args, "dry_run", False):
+        return None
+    names = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], text=True, stdout=subprocess.PIPE).stdout.splitlines()
+    if container_name in names:
+        return ["docker", "attach", container_name]
+    return None
+
+
 def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, env_path: str) -> List[str]:
     repo = repo_name(value(config, "CODEMATE_GIT_REPO_URL"))
     identity = value(config, "CODEMATE_BRANCH_NAME") or (
@@ -476,34 +628,20 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         agent = "shell"
     container_name = f"codemate-{sanitized(agent)}-{sanitized(repo)}-{sanitized(identity)}"
 
-    if not args.dry_run and subprocess.run(["docker", "ps", "--format", "{{.Names}}"], text=True, stdout=subprocess.PIPE).stdout.splitlines().count(container_name):
-        # The agent runs directly on the container TTY (no tmux), so re-running
-        # codemate re-attaches to the live session instead of opening a shell.
-        # Shell sessions follow the same rule: re-running re-attaches to zsh.
-        return ["docker", "attach", container_name]
+    # Re-running the same target re-attaches to the live session; shell
+    # sessions have their own name (set above), so they never attach to an
+    # agent working the same repository/branch.
+    attach = attach_if_running(container_name, args)
+    if attach:
+        return attach
 
-    docker_params: List[str] = []
-    if args.docker_param:
-        for param in args.docker_param:
-            docker_params.extend(split_words(param))
-    else:
-        docker_params = split_words(value(config, "CODEMATE_DOCKER_PARAMS"))
-    mounts = args.mount or split_words(value(config, "CODEMATE_MOUNTS"))
-    has_network = "--network" in docker_params or any(p.startswith("--network=") for p in docker_params)
-    network_args = [] if has_network or sys.platform == "darwin" else ["--network", "host"]
-
+    docker_params = resolved_docker_params(config, args)
     codemate_dir = codemate_home()
     volume_args = ["-v", f"{codemate_dir}:/home/agent/.codemate"]
-    for entry in sorted(codemate_dir.iterdir()):
-        volume_args.extend(["-v", f"{entry}:/home/agent/{entry.name}"])
+    volume_args.extend(home_entry_volume_args(codemate_dir))
     if Path("skills").is_dir():
         volume_args.extend(["-v", f"{Path.cwd() / 'skills'}:/home/agent/.claude/skills"])
-    for mount in mounts:
-        volume_args.extend(["-v", mount])
-
-    pull_args: List[str] = (
-        ["--pull", "missing"] if value(config, "CODEMATE_SKIP_PULL") else ["--pull", "always"]
-    )
+    volume_args.extend(custom_mount_args(config, args))
 
     command = [
         "docker",
@@ -511,8 +649,8 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         "--rm",
         "--name",
         container_name,
-        *pull_args,
-        *network_args,
+        *pull_args(config),
+        *network_args(docker_params),
         *docker_params,
         "-it",
         *volume_args,
@@ -532,6 +670,89 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     return command
 
 
+def pure_image(config: Mapping[str, ResolvedValue]) -> str:
+    """Image used by --pure mode.
+
+    ``--image`` and ``--build`` win; ``CODEMATE_IMAGE`` coming from .env or the
+    ambient environment is ignored so an existing standard-image setting does
+    not silently leak into pure mode.
+    """
+    resolved = config.get("CODEMATE_IMAGE")
+    if resolved is not None and resolved.source in {"cli", "build"}:
+        return resolved.value
+    return DEFAULT_PURE_IMAGE
+
+
+def pure_workspace_name() -> str:
+    return sanitized(Path.cwd().name) or "workspace"
+
+
+def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, env_path: str) -> List[str]:
+    """Run the pure image with the local pure CodeMate home mounted.
+
+    There is no repository clone, no agent launcher, and no GitHub setup: the
+    container starts the image's default command (zsh) in the current working
+    directory, which is mounted read-write into the container. Only the
+    entries of the pure home (~/.codemate-pure by default) are mounted into
+    $HOME, so pure sessions keep their own credentials and config without
+    sharing ~/.codemate or exposing the pure home itself.
+    """
+    workspace = pure_workspace_name()
+    container_name = f"codemate-pure-{workspace}"
+    attach = attach_if_running(container_name, args)
+    if attach:
+        return attach
+
+    docker_params = resolved_docker_params(config, args)
+    volume_args = home_entry_volume_args(ensure_pure_home())
+    volume_args.extend(["-v", f"{Path.cwd()}:/home/agent/{workspace}"])
+    volume_args.extend(custom_mount_args(config, args))
+
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "--name",
+        container_name,
+        *pull_args(config),
+        *network_args(docker_params),
+        *docker_params,
+        "-it",
+        *volume_args,
+        "--env",
+        f"TZ={value(config, 'TZ')}",
+        "--env-file",
+        env_path,
+        "-w",
+        f"/home/agent/{workspace}",
+        value(config, "CODEMATE_IMAGE"),
+    ]
+
+
+def print_pure_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
+    workspace = pure_workspace_name()
+    mounts = args.mount or split_words(value(config, "CODEMATE_MOUNTS"))
+    docker_params_text = inline_detail_list(resolved_docker_params(config, args))
+    extra_env_keys = sorted(key for key, item in config.items() if item.field is None)
+    extra_env_text = inline_detail_list(extra_env_keys)
+    inline_width = max(len(line) for text in (docker_params_text, extra_env_text) for line in text.splitlines())
+
+    table = Table(title="CodeMate Pure Launch Details", show_header=False, box=None, padding=(0, 1))
+    table.add_column("Setting", style="cyan", no_wrap=True)
+    table.add_column("Value", min_width=inline_width)
+    table.add_row("Mode", "pure (zsh, no repository setup)")
+    table.add_row("Image", value(config, "CODEMATE_IMAGE"))
+    table.add_row("Home dir", str(pure_home()))
+    table.add_row("Workspace", f"{Path.cwd()} → /home/agent/{workspace}")
+    if value(config, "CODEMATE_SKIP_PULL"):
+        table.add_row("Image pull", "skipped")
+    table.add_row("Timezone", value(config, "TZ"))
+    table.add_row("Custom mounts", detail_list(mounts))
+    table.add_row("Docker params", docker_params_text)
+    table.add_row("Extra envs", extra_env_text)
+    console.print(table, crop=False)
+
+
 def print_config(config: Mapping[str, ResolvedValue]) -> None:
     for key in sorted(config):
         item = config[key]
@@ -548,32 +769,48 @@ def run_codemate(args: SimpleNamespace) -> None:
         return
     if args.shell and args.query:
         raise SystemExit("--shell opens an interactive zsh session; remove --query.")
+    pure = is_pure(args)
+    if pure and args.shell:
+        raise SystemExit("--pure already opens an interactive zsh session; remove --shell.")
+    if pure and args.query:
+        raise SystemExit("--pure opens an interactive zsh session; remove --query.")
 
-    ensure_global_config()
+    if not pure:
+        # Pure mode needs no CodeMate configuration: it mounts ~/.codemate when
+        # it exists and works with an empty directory otherwise.
+        ensure_global_config()
     config = resolve_config(args, cwd)
     chat_defaults(config)
 
     if args.build:
-        tag = args.tag or "codemate:local"
-        build_image(args.dockerfile, tag)
+        dockerfile = args.dockerfile or (DEFAULT_PURE_DOCKERFILE if pure else DEFAULT_DOCKERFILE)
+        tag = args.tag or (DEFAULT_PURE_TAG if pure else DEFAULT_TAG)
+        build_image(dockerfile, tag)
         config["CODEMATE_IMAGE"] = ResolvedValue(tag, "build", FIELD_BY_NAME["CODEMATE_IMAGE"])
 
-    if not args.config:
+    if pure:
+        config["CODEMATE_IMAGE"] = ResolvedValue(pure_image(config), "pure", FIELD_BY_NAME["CODEMATE_IMAGE"])
+    elif not args.config:
         validate_config(config)
 
-    issue_defaults(config)
+    if not pure:
+        issue_defaults(config)
 
     if args.config:
         print_config(config)
         return
 
     if not args.dry_run:
-        check_prerequisites(config)
+        check_prerequisites(config, pure=pure)
     env_file = write_env_file(config)
     env_file.close()
     try:
-        cmd = docker_command(config, args, env_file.name)
-        print_launch_details(config, args)
+        if pure:
+            cmd = pure_docker_command(config, args, env_file.name)
+            print_pure_launch_details(config, args)
+        else:
+            cmd = docker_command(config, args, env_file.name)
+            print_launch_details(config, args)
         if args.dry_run:
             print(" ".join(shlex.quote(part) for part in cmd).replace(env_file.name, "<generated-env-file>"))
             return
@@ -599,7 +836,23 @@ def cli(
     no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push."),
     chat: bool = typer.Option(False, "--chat", help="Run in chat mode: skip PR creation and CodeMate system prompt injection."),
     shell: bool = typer.Option(False, "--shell", help="Open an interactive zsh shell in the container instead of launching the agent."),
+    pure: bool = typer.Option(
+        False,
+        "--pure",
+        help=(
+            "Run the pure image: mount the local CodeMate home and the current directory, "
+            "then start an interactive zsh session with no repository or GitHub setup."
+        ),
+    ),
     docker_param: List[str] = typer.Option([], "--docker-param", help="Extra Docker run parameter."),
+    network: Optional[str] = typer.Option(
+        None,
+        "--network",
+        help=(
+            "Docker network mode, e.g. host, bridge, or none. "
+            "Default: host on Linux, the Docker default on macOS."
+        ),
+    ),
     repo: Optional[str] = typer.Option(None, "--repo", help="Git repository URL."),
     upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
     mount: List[str] = typer.Option([], "--mount", help="Custom volume mount."),
@@ -611,8 +864,17 @@ def cli(
     ),
     tz: Optional[str] = typer.Option(None, "--tz", help="Container timezone. Default: UTC"),
     build_image_flag: bool = typer.Option(False, "--build", help="Build Docker image from local Dockerfile."),
-    dockerfile: str = typer.Option("docker/Dockerfile", "-f", "--dockerfile", help="Path to Dockerfile."),
-    tag: Optional[str] = typer.Option(None, "--tag", help="Image tag for local build."),
+    dockerfile: Optional[str] = typer.Option(
+        None,
+        "-f",
+        "--dockerfile",
+        help=f"Path to Dockerfile. Default: {DEFAULT_DOCKERFILE} ({DEFAULT_PURE_DOCKERFILE} with --pure).",
+    ),
+    tag: Optional[str] = typer.Option(
+        None,
+        "--tag",
+        help=f"Image tag for local build. Default: {DEFAULT_TAG} ({DEFAULT_PURE_TAG} with --pure).",
+    ),
     env_values: List[str] = typer.Option([], "--env", help="Extra container env KEY=VALUE."),
     env_files: List[str] = typer.Option([], "--env-file", help="Additional env file to merge."),
     show_config: bool = typer.Option(False, "--config", help="Print resolved config with sources."),
@@ -631,7 +893,9 @@ def cli(
         no_pr=no_pr,
         chat=chat,
         shell=shell,
+        pure=pure,
         docker_param=docker_param,
+        network=network,
         repo=repo,
         upstream=upstream,
         mount=mount,
