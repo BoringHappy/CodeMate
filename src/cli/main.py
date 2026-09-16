@@ -78,6 +78,40 @@ def codemate_home() -> Path:
     return Path(os.path.expanduser(os.path.expandvars(raw)))
 
 
+def pure_home() -> Path:
+    """Resolve the CodeMate home used by pure mode.
+
+    Pure sessions get their own home so they never read or write the standard
+    CodeMate home's agent credentials and plugin state. Defaults to the
+    standard home with a ``-pure`` suffix (``~/.codemate-pure``), so a custom
+    CODEMATE_HOME keeps its sibling; CODEMATE_PURE_HOME overrides it entirely.
+    """
+    raw = os.environ.get("CODEMATE_PURE_HOME")
+    if raw:
+        return Path(os.path.expanduser(os.path.expandvars(raw)))
+    base = codemate_home()
+    if base.name:
+        return Path(f"{base}-pure")
+    return base / "codemate-pure"
+
+
+def ensure_pure_home() -> Path:
+    """Create the pure home plus the agent state entries mounted into $HOME.
+
+    Seeding ~/.claude, ~/.claude.json, and ~/.codex means the first login or
+    config write inside a pure container lands in the pure home instead of the
+    container's throwaway filesystem.
+    """
+    home = pure_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".codex").mkdir(exist_ok=True)
+    claude_json = home / ".claude.json"
+    if not claude_json.exists():
+        claude_json.write_text("{}\n")
+    return home
+
+
 def is_pure(args: SimpleNamespace) -> bool:
     """Pure mode: no repository setup, no plugins, just a zsh shell.
 
@@ -479,17 +513,16 @@ def chat_defaults(config: Dict[str, ResolvedValue]) -> None:
         config["CODEMATE_NO_PR"] = ResolvedValue("true", "chat", FIELD_BY_NAME["CODEMATE_NO_PR"])
 
 
-def codemate_volume_args() -> List[str]:
-    """Mount the host CodeMate home plus each top-level entry inside it.
+def codemate_volume_args(home: Path) -> List[str]:
+    """Mount a CodeMate home plus each top-level entry inside it.
 
     Mounting the entries individually keeps ~/.claude, ~/.codex, and similar
     agent state directories available inside the container with their natural
     paths, while ~/.codemate itself stays browsable.
     """
-    codemate_dir = codemate_home()
-    codemate_dir.mkdir(parents=True, exist_ok=True)
-    volume_args = ["-v", f"{codemate_dir}:/home/agent/.codemate"]
-    for entry in sorted(codemate_dir.iterdir()):
+    home.mkdir(parents=True, exist_ok=True)
+    volume_args = ["-v", f"{home}:/home/agent/.codemate"]
+    for entry in sorted(home.iterdir()):
         volume_args.extend(["-v", f"{entry}:/home/agent/{entry.name}"])
     return volume_args
 
@@ -603,7 +636,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         return attach
 
     docker_params = resolved_docker_params(config, args)
-    volume_args = codemate_volume_args()
+    volume_args = codemate_volume_args(codemate_home())
     if Path("skills").is_dir():
         volume_args.extend(["-v", f"{Path.cwd() / 'skills'}:/home/agent/.claude/skills"])
     volume_args.extend(custom_mount_args(config, args))
@@ -653,11 +686,13 @@ def pure_workspace_name() -> str:
 
 
 def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, env_path: str) -> List[str]:
-    """Run the pure image with the local .codemate directory mounted.
+    """Run the pure image with the local pure CodeMate home mounted.
 
     There is no repository clone, no agent launcher, and no GitHub setup: the
     container starts the image's default command (zsh) in the current working
-    directory, which is mounted read-write into the container.
+    directory, which is mounted read-write into the container. The pure home
+    (~/.codemate-pure by default) is mounted instead of the standard
+    ~/.codemate, so pure sessions keep their own credentials and config.
     """
     workspace = pure_workspace_name()
     container_name = f"codemate-pure-{workspace}"
@@ -666,7 +701,7 @@ def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespa
         return attach
 
     docker_params = resolved_docker_params(config, args)
-    volume_args = codemate_volume_args()
+    volume_args = codemate_volume_args(ensure_pure_home())
     volume_args.extend(["-v", f"{Path.cwd()}:/home/agent/{workspace}"])
     volume_args.extend(custom_mount_args(config, args))
 
@@ -704,7 +739,7 @@ def print_pure_launch_details(config: Mapping[str, ResolvedValue], args: SimpleN
     table.add_column("Value", min_width=inline_width)
     table.add_row("Mode", "pure (zsh, no repository setup)")
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
-    table.add_row("Home dir", str(codemate_home()))
+    table.add_row("Home dir", str(pure_home()))
     table.add_row("Workspace", f"{Path.cwd()} → /home/agent/{workspace}")
     if value(config, "CODEMATE_SKIP_PULL"):
         table.add_row("Image pull", "skipped")

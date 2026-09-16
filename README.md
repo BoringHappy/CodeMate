@@ -186,7 +186,7 @@ codemate --pure --network bridge --mount ~/data:/data --tz America/New_York
 
 What pure mode does:
 
-- Mounts `CODEMATE_HOME` (default `~/.codemate`) at `/home/agent/.codemate`, plus each top-level entry (`~/.claude`, `~/.codex`, `~/.claude.json`, ...) at the matching path in `$HOME`, so existing agent credentials and settings are reused
+- Mounts its own home, `CODEMATE_PURE_HOME` (default `~/.codemate-pure`), at `/home/agent/.codemate`, plus each top-level entry (`.claude`, `.claude.json`, `.codex`, ...) at the matching path in `$HOME`. The pure home is created on first run and seeded with `.claude`, `.claude.json`, and `.codex`, so logging in inside the container persists there
 - Mounts the current working directory at `/home/agent/<directory-name>` and starts there
 - Runs the image's default command, `zsh`
 - Keeps `--mount`, `--docker-param`, `--network`, `--image`, `--env`, `--env-file`, `--tz`, `--skip-pull`, and `--dry-run` available
@@ -200,6 +200,7 @@ What pure mode skips:
 
 Notes:
 
+- Pure mode never touches the standard `CODEMATE_HOME` (`~/.codemate`): the two homes are separate paths, so pure sessions have their own Claude/Codex credentials and settings. Set `CODEMATE_PURE_HOME` to move it elsewhere; it defaults to the standard home with a `-pure` suffix, so `CODEMATE_HOME=/data/codemate` implies `/data/codemate-pure`
 - `--image` and `--build` select the image in pure mode; `CODEMATE_IMAGE` from `.env` or the environment is ignored so a standard image setting does not leak into pure mode
 - Use `--network <mode>` for Docker network modes. With `--docker-param`, keep a flag and its value in one quoted string: `--docker-param "--network bridge"` works, `--docker-param --network bridge` does not
 
@@ -305,6 +306,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
 | `CODEMATE_SKIP_PULL` | No | Skip pulling the Docker image at startup; the image is only pulled if it is missing locally |
 | `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
+| `CODEMATE_PURE_HOME` | No | Home directory used by `--pure` sessions; supports `~` and `$VAR` expansion (default: the `CODEMATE_HOME` path with a `-pure` suffix, e.g. `~/.codemate-pure`) |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
 | `CODEMATE_INSTANCE_ID` | No | Runtime instance namespace used to distinguish concurrent agent processes |
 | `CODEMATE_RUNTIME_DIR` | No | Override the root for session-scoped hook state (defaults to `$XDG_RUNTIME_DIR/codemate` or `/tmp/codemate-<uid>`) |
@@ -322,7 +324,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_CUSTOM_PLUGINS` | No | Comma-separated list of custom plugins to install (e.g., `plugin1@marketplace1,plugin2@marketplace2`) |
 | `CODEMATE_SOFT_LINKS` | No | Comma-separated `source:destination` pairs to symlink after repo setup (e.g., `/data/models:/home/agent/models,/data/cache:/home/agent/.cache`) |
 
-`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, `CODEMATE_CHAT`, `CODEMATE_SKIP_PULL`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, `codemate --chat` to skip PR creation and CodeMate system prompt injection, `codemate --shell` to run the same container setup and then drop into an interactive zsh shell instead of starting the agent, `codemate --pure` to skip setup entirely and run a plain zsh container with the local CodeMate home mounted, `codemate --skip-pull` to use a locally cached Docker image without forcing a pull on startup, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
+`CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, `CODEMATE_CHAT`, `CODEMATE_SKIP_PULL`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, `codemate --chat` to skip PR creation and CodeMate system prompt injection, `codemate --shell` to run the same container setup and then drop into an interactive zsh shell instead of starting the agent, `codemate --pure` to skip setup entirely and run a plain zsh container with its own home (`CODEMATE_PURE_HOME`) mounted, `codemate --skip-pull` to use a locally cached Docker image without forcing a pull on startup, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
 
 
 ## How It Works
@@ -342,7 +344,7 @@ On startup, the container:
 
 With `--shell`, the container runs steps 1-5 and then opens an interactive zsh shell instead of installing agent plugins and starting Claude Code or Codex.
 
-With `--pure`, none of those steps run. The pure image starts zsh directly with `CODEMATE_HOME` and the current directory mounted, so it needs no GitHub token, git identity, repository URL, or host `git`/`gh` installation. See [Pure Mode](#pure-mode) for details.
+With `--pure`, none of those steps run. The pure image starts zsh directly with its own home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`) and the current directory mounted, so it needs no GitHub token, git identity, repository URL, or host `git`/`gh` installation. See [Pure Mode](#pure-mode) for details.
 
 ## Skills
 

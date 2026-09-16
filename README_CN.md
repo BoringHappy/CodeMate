@@ -178,7 +178,7 @@ codemate --pure --network bridge --mount ~/data:/data --tz Asia/Shanghai
 
 Pure 模式会做：
 
-- 把 `CODEMATE_HOME`（默认 `~/.codemate`）挂载到 `/home/agent/.codemate`，并把其中每个顶层条目（`~/.claude`、`~/.codex`、`~/.claude.json` 等）挂载到 `$HOME` 下的同名路径，从而复用已有的 agent 凭证与配置
+- 挂载它自己的 home：`CODEMATE_PURE_HOME`（默认 `~/.codemate-pure`）到 `/home/agent/.codemate`，并把其中每个顶层条目（`.claude`、`.claude.json`、`.codex` 等）挂载到 `$HOME` 下的同名路径。pure home 会在首次运行时创建，并预置 `.claude`、`.claude.json`、`.codex`，所以在容器里登录一次即可持久保存
 - 把当前工作目录挂载到 `/home/agent/<目录名>` 并作为工作目录
 - 执行镜像的默认命令 `zsh`
 - 仍然支持 `--mount`、`--docker-param`、`--network`、`--image`、`--env`、`--env-file`、`--tz`、`--skip-pull`、`--dry-run`
@@ -192,6 +192,7 @@ Pure 模式会跳过：
 
 注意：
 
+- Pure 模式完全不会读写标准的 `CODEMATE_HOME`（`~/.codemate`）：两者是不同路径，pure 会话拥有自己的 Claude/Codex 凭证与配置。可用 `CODEMATE_PURE_HOME` 指定其他位置；默认是标准 home 加 `-pure` 后缀，因此 `CODEMATE_HOME=/data/codemate` 对应 `/data/codemate-pure`
 - Pure 模式下用 `--image` 和 `--build` 选择镜像；`.env` 或环境变量里的 `CODEMATE_IMAGE` 会被忽略，避免标准镜像设置泄漏到 pure 模式
 - 使用 `--network <mode>` 指定 Docker 网络模式。使用 `--docker-param` 时，请把参数和取值放在同一个引号字符串中：`--docker-param "--network bridge"` 可用，`--docker-param --network bridge` 不可用
 
@@ -333,6 +334,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
 | `CODEMATE_SKIP_PULL` | 否 | 启动时跳过 Docker 镜像拉取；仅当本地缺少镜像时才拉取 |
 | `CODEMATE_HOME` | 否 | 宿主机上的 CodeMate home 目录；支持 `~` 和 `$VAR` 展开（默认：`~/.codemate`） |
+| `CODEMATE_PURE_HOME` | 否 | `--pure` 会话使用的 home 目录；支持 `~` 和 `$VAR` 展开（默认：`CODEMATE_HOME` 路径加 `-pure` 后缀，例如 `~/.codemate-pure`） |
 | `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
 | `CODEMATE_INSTANCE_ID` | 否 | 区分同一主机或容器内并发 agent 进程的 runtime instance 名称 |
 | `CODEMATE_RUNTIME_DIR` | 否 | 覆盖 session 级 hook 状态根目录（默认 `$XDG_RUNTIME_DIR/codemate` 或 `/tmp/codemate-<uid>`） |
@@ -350,7 +352,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_CUSTOM_PLUGINS` | 否 | 逗号分隔的要安装的自定义插件列表（例如：`plugin1@marketplace1,plugin2@marketplace2`） |
 | `CODEMATE_SOFT_LINKS` | 否 | 逗号分隔的 `source:destination` 软链接配置（例如：`/data/models:/home/agent/models,/data/cache:/home/agent/.cache`） |
 
-`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR`、`CODEMATE_CHAT`、`CODEMATE_SKIP_PULL` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --chat` 可跳过 PR 创建和 CodeMate system prompt 注入；使用 `codemate --shell` 可执行同样的容器初始化流程，但不启动 agent，而是直接进入交互式 zsh；使用 `codemate --pure` 可完全跳过初始化，直接运行挂载了本地 CodeMate home 的纯 zsh 容器；使用 `codemate --skip-pull` 可跳过启动时的镜像拉取、直接使用本地缓存的镜像；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
+`CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR`、`CODEMATE_CHAT`、`CODEMATE_SKIP_PULL` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --chat` 可跳过 PR 创建和 CodeMate system prompt 注入；使用 `codemate --shell` 可执行同样的容器初始化流程，但不启动 agent，而是直接进入交互式 zsh；使用 `codemate --pure` 可完全跳过初始化，直接运行挂载了独立 home（`CODEMATE_PURE_HOME`）的纯 zsh 容器；使用 `codemate --skip-pull` 可跳过启动时的镜像拉取、直接使用本地缓存的镜像；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
 
 
 ## 工作原理
@@ -367,7 +369,7 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 
 使用 `--shell` 时，容器完成上述仓库初始化后直接打开交互式 zsh，不安装 agent 插件，也不启动 Claude Code 或 Codex。
 
-使用 `--pure` 时，上述步骤全部不执行。pure 镜像直接启动 zsh，只挂载 `CODEMATE_HOME` 和当前目录，因此不需要 GitHub token、git 身份、仓库 URL，也不要求宿主机安装 `git` 或 `gh`。详见 [Pure 模式](#pure-模式)。
+使用 `--pure` 时，上述步骤全部不执行。pure 镜像直接启动 zsh，只挂载它自己的 home（`CODEMATE_PURE_HOME`，默认 `~/.codemate-pure`）和当前目录，因此不需要 GitHub token、git 身份、仓库 URL，也不要求宿主机安装 `git` 或 `gh`。详见 [Pure 模式](#pure-模式)。
 
 ## Skills
 

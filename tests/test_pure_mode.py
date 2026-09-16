@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -65,13 +66,55 @@ def codemate_home(monkeypatch, tmp_path):
     return custom
 
 
-def test_pure_mode_mounts_the_local_codemate_home(codemate_home, tmp_path, monkeypatch) -> None:
+def test_pure_mode_mounts_a_separate_home(codemate_home, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
     cmd = main.pure_docker_command(make_config(), make_args(), "/tmp/codemate.env")
 
+    pure = Path(f"{codemate_home}-pure")
+    assert f"{pure}:/home/agent/.codemate" in cmd
+    assert f"{codemate_home}:/home/agent/.codemate" not in cmd
+    assert f"{pure / '.claude'}:/home/agent/.claude" in cmd
+    assert f"{pure / '.claude.json'}:/home/agent/.claude.json" in cmd
+    assert f"{pure / '.codex'}:/home/agent/.codex" in cmd
+
+
+def test_pure_mode_seeds_agent_state_in_the_pure_home(codemate_home, tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    main.pure_docker_command(make_config(), make_args(), "/tmp/codemate.env")
+
+    pure = Path(f"{codemate_home}-pure")
+    assert (pure / ".claude").is_dir()
+    assert (pure / ".codex").is_dir()
+    assert (pure / ".claude.json").is_file()
+
+
+def test_pure_home_follows_a_custom_codemate_home(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("CODEMATE_PURE_HOME", raising=False)
+    monkeypatch.setenv("CODEMATE_HOME", str(tmp_path / "data"))
+
+    assert main.pure_home() == tmp_path / "data-pure"
+
+
+def test_pure_home_can_be_overridden(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CODEMATE_PURE_HOME", "~/pure-home")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert main.pure_home() == tmp_path / "pure-home"
+
+
+def test_standard_mode_keeps_the_shared_home(codemate_home, tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    cmd = main.docker_command(
+        make_config(CODEMATE_GIT_REPO_URL="https://github.com/BoringHappy/CodeMate.git", CODEMATE_BRANCH_NAME="main"),
+        make_args(pure=False, shell=True),
+        "/tmp/codemate.env",
+    )
+
     assert f"{codemate_home}:/home/agent/.codemate" in cmd
-    assert f"{codemate_home / '.claude'}:/home/agent/.claude" in cmd
+    assert f"{codemate_home}-pure:/home/agent/.codemate" not in cmd
 
 
 def test_pure_mode_mounts_the_working_directory_and_starts_zsh(codemate_home, tmp_path, monkeypatch) -> None:
