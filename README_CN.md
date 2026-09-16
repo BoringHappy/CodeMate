@@ -215,6 +215,27 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/xyz
 ```
 
+**预装的浏览器自动化工具：**
+
+基础镜像已内置 [Playwright](https://playwright.dev/) 及 Chromium 和所需的系统依赖，开箱即可进行浏览器自动化：
+
+```bash
+playwright --version
+playwright screenshot "https://example.com" /tmp/page.png
+npx playwright test
+```
+
+浏览器安装在镜像级的 `/ms-playwright` 目录（通过 `PLAYWRIGHT_BROWSERS_PATH` 环境变量指定），而不是每个用户各自的缓存目录，因此所有用户共享同一份浏览器。如需添加 Firefox 或 WebKit，可扩展基础镜像：
+
+```dockerfile
+FROM ghcr.io/boringhappy/codemate:latest
+
+# 浏览器安装在 /ms-playwright，该目录属于 root
+USER root
+RUN playwright install --with-deps firefox \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+```
+
 ## 基于 Issue 的工作流
 
 CodeMate 支持使用 `--issue` 标志直接从 GitHub issue 开始工作。此工作流会自动：

@@ -58,4 +58,6 @@ jobs:
           docker run --rm codemate-base:pr-check bash -euxc '
             kubectl version --client --output=yaml
             helm version --short
+            playwright --version
+            playwright screenshot --device="Desktop Chrome" "data:text/html,<h1>playwright</h1>" /tmp/playwright-smoke.png
           '

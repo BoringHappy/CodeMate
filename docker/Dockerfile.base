@@ -9,6 +9,8 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=/home/agent/.local/bin:/usr/local/share/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+# Shared location for Playwright browsers so every user in the image can use them
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Create non-root user and configure system
 RUN set -ex \
@@ -90,6 +92,16 @@ RUN set -euxo pipefail \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/awscliv2.zip /tmp/aws
+
+# Install Playwright with Chromium and its system dependencies
+# Browsers go to PLAYWRIGHT_BROWSERS_PATH (/ms-playwright) instead of a per-user
+# cache, so they are baked into the image once and shared by all users
+RUN set -euxo pipefail \
+    && npm install -g playwright \
+    && playwright install --with-deps chromium \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm cache clean --force
 
 # Switch to agent user for user-specific installations
 USER agent
