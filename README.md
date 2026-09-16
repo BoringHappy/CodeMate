@@ -223,6 +223,23 @@ Then build and run with your custom Dockerfile:
 codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/xyz
 ```
 
+**Preinstalled Browser Automation:**
+
+The base image ships the [Playwright](https://playwright.dev/) CLI, so browser automation needs no extra tooling. Browsers are not bundled — download the ones your project needs on demand:
+
+```bash
+playwright --version
+playwright install chromium                  # add firefox / webkit as needed
+playwright screenshot "https://example.com" /tmp/page.png
+npx playwright test
+```
+
+Browsers are downloaded into the current user's cache (`~/.cache/ms-playwright`) and need no elevated privileges. If a browser fails to launch because system libraries are missing, install the OS dependencies once:
+
+```bash
+sudo "$(command -v playwright)" install-deps chromium
+```
+
 ## Environment Variables
 
 > **Note:** When using `codemate`, these variables are handled automatically through the setup process. This reference is primarily for advanced Docker usage or troubleshooting.

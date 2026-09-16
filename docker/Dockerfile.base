@@ -91,6 +91,13 @@ RUN set -euxo pipefail \
     && /tmp/aws/install \
     && rm -rf /tmp/awscliv2.zip /tmp/aws
 
+# Install the Playwright CLI, without any browser binaries
+# Browsers are downloaded on demand (`playwright install <browser>`), which keeps
+# the image small and lets each project pick only the browsers it needs
+RUN set -euxo pipefail \
+    && npm install -g playwright \
+    && npm cache clean --force
+
 # Switch to agent user for user-specific installations
 USER agent
 
