@@ -10,8 +10,14 @@ FROM ${BASE_IMAGE}
 
 # The base image already provides the non-root agent user, zsh, and the dev
 # toolchain; only the coding agents are installed here.
-USER agent
+USER root
 
+# npm installs run as the agent user below, so make sure the shared npm prefix
+# is writable by it. Base images built before the ownership fix in
+# Dockerfile.base still ship lib/node_modules owned by root.
+RUN chown -R agent:agent /usr/local/share/npm-global
+
+USER agent
 # Prefer npm-managed tools over any persisted standalone symlink in ~/.local/bin.
 ENV PATH="/usr/local/share/npm-global/bin:/home/agent/.local/bin:${PATH}"
 RUN curl -fsSL https://claude.ai/install.sh | bash \
