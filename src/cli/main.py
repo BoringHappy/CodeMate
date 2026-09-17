@@ -19,8 +19,11 @@ from rich.console import Console
 from rich.table import Table
 
 
-DEFAULT_IMAGE = "ghcr.io/boringhappy/codemate:latest"
-DEFAULT_PURE_IMAGE = "ghcr.io/boringhappy/codemate-pure:latest"
+DEFAULT_IMAGE_REGISTRY = "ghcr.io"
+DEFAULT_IMAGE_REPOSITORY = "boringhappy/codemate:latest"
+DEFAULT_PURE_IMAGE_REPOSITORY = "boringhappy/codemate-pure:latest"
+DEFAULT_IMAGE = f"{DEFAULT_IMAGE_REGISTRY}/{DEFAULT_IMAGE_REPOSITORY}"
+DEFAULT_PURE_IMAGE = f"{DEFAULT_IMAGE_REGISTRY}/{DEFAULT_PURE_IMAGE_REPOSITORY}"
 DEFAULT_DOCKERFILE = "docker/Dockerfile"
 DEFAULT_PURE_DOCKERFILE = "docker/Dockerfile.pure"
 DEFAULT_TAG = "codemate:local"
@@ -76,6 +79,15 @@ def codemate_home() -> Path:
     """
     raw = os.environ.get("CODEMATE_HOME") or str(Path.home() / ".codemate")
     return Path(os.path.expanduser(os.path.expandvars(raw)))
+
+
+def default_image(registry: str, repository: str = DEFAULT_IMAGE_REPOSITORY) -> str:
+    """Build a built-in image reference served from the configured registry.
+
+    Only the default images go through here: a mirror registry substitutes for
+    ghcr.io, while an explicit ``--image``/``CODEMATE_IMAGE`` is never rewritten.
+    """
+    return f"{registry.strip().rstrip('/') or DEFAULT_IMAGE_REGISTRY}/{repository}"
 
 
 def pure_home() -> Path:
@@ -168,6 +180,7 @@ FIELDS: Tuple[Field, ...] = (
     Field("LARK_WEBHOOK", secret=True),
     Field("ANTHROPIC_AUTH_TOKEN", secret=True),
     Field("ANTHROPIC_BASE_URL"),
+    Field("CODEMATE_IMAGE_REGISTRY", "image_registry", default=DEFAULT_IMAGE_REGISTRY, docker_export=False),
     Field("CODEMATE_IMAGE", "image", default=DEFAULT_IMAGE, docker_export=False),
 )
 
@@ -278,6 +291,15 @@ def resolve_config(args: SimpleNamespace, cwd: Path) -> Dict[str, ResolvedValue]
             raise SystemExit(f"--env expects KEY=VALUE, got: {item}")
         key, value = item.split("=", 1)
         resolved[key] = ResolvedValue(value, "cli", None)
+
+    # The built-in image follows CODEMATE_IMAGE_REGISTRY, so a mirror registry
+    # serves the default images without users having to pass --image.
+    image = resolved["CODEMATE_IMAGE"]
+    if image.source == "default":
+        registry = resolved["CODEMATE_IMAGE_REGISTRY"].value
+        resolved["CODEMATE_IMAGE"] = ResolvedValue(
+            default_image(registry), "default", FIELD_BY_NAME["CODEMATE_IMAGE"]
+        )
 
     return resolved
 
@@ -675,12 +697,13 @@ def pure_image(config: Mapping[str, ResolvedValue]) -> str:
 
     ``--image`` and ``--build`` win; ``CODEMATE_IMAGE`` coming from .env or the
     ambient environment is ignored so an existing standard-image setting does
-    not silently leak into pure mode.
+    not silently leak into pure mode. The pure default follows
+    ``CODEMATE_IMAGE_REGISTRY`` like the standard default does.
     """
     resolved = config.get("CODEMATE_IMAGE")
     if resolved is not None and resolved.source in {"cli", "build"}:
         return resolved.value
-    return DEFAULT_PURE_IMAGE
+    return default_image(value(config, "CODEMATE_IMAGE_REGISTRY"), DEFAULT_PURE_IMAGE_REPOSITORY)
 
 
 def pure_workspace_name() -> str:
@@ -857,6 +880,11 @@ def cli(
     upstream: Optional[str] = typer.Option(None, "--upstream", help="Upstream repository URL."),
     mount: List[str] = typer.Option([], "--mount", help="Custom volume mount."),
     image: Optional[str] = typer.Option(None, "--image", help=f"Docker image to use. Default: {DEFAULT_IMAGE}"),
+    image_registry: Optional[str] = typer.Option(
+        None,
+        "--image-registry",
+        help=f"Registry serving the default images. Default: {DEFAULT_IMAGE_REGISTRY}",
+    ),
     skip_pull: bool = typer.Option(
         False,
         "--skip-pull",
@@ -900,6 +928,7 @@ def cli(
         upstream=upstream,
         mount=mount,
         image=image,
+        image_registry=image_registry,
         skip_pull=skip_pull,
         tz=tz,
         build=build_image_flag,
