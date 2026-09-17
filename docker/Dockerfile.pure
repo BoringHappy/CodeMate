@@ -28,4 +28,14 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && claude --version \
     && codex --version
 
+# CodeMate launches its own agents with permission checks disabled, so give
+# pure users the same behavior by aliasing both CLIs to their "allow
+# everything" flags.
+RUN cat >> /home/agent/.zshrc <<'EOF'
+
+# CodeMate: run the agents with permission prompts disabled.
+alias claude='claude --dangerously-skip-permissions'
+alias codex='codex --yolo'
+EOF
+
 CMD ["zsh"]
