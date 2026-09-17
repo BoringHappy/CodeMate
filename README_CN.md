@@ -129,8 +129,8 @@ codemate --build --branch feature/xyz
 # 使用自定义 Dockerfile 路径和标签构建
 codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xyz
 
-# 中国用户：使用 DaoCloud 镜像加速镜像拉取
-codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:latest
+# 中国用户：从镜像仓库（mirror）拉取内置镜像
+codemate --branch feature/xyz --image-registry ghcr.m.daocloud.io
 
 # 启动时跳过镜像拉取（本地已有镜像时直接使用）
 codemate --branch feature/xyz --skip-pull
@@ -193,7 +193,7 @@ Pure 模式会跳过：
 注意：
 
 - Pure 模式完全不会读写标准的 `CODEMATE_HOME`（`~/.codemate`）：两者是不同路径，pure 会话拥有自己的 Claude/Codex 凭证与配置。可用 `CODEMATE_PURE_HOME` 指定其他位置；默认是标准 home 加 `-pure` 后缀，因此 `CODEMATE_HOME=/data/codemate` 对应 `/data/codemate-pure`
-- Pure 模式下用 `--image` 和 `--build` 选择镜像；`.env` 或环境变量里的 `CODEMATE_IMAGE` 会被忽略，避免标准镜像设置泄漏到 pure 模式
+- Pure 模式下用 `--image` 和 `--build` 选择镜像；`.env` 或环境变量里的 `CODEMATE_IMAGE` 会被忽略，避免标准镜像设置泄漏到 pure 模式。pure 的默认镜像同样遵循 `CODEMATE_IMAGE_REGISTRY`
 - 使用 `--network <mode>` 指定 Docker 网络模式。使用 `--docker-param` 时，请把参数和取值放在同一个引号字符串中：`--docker-param "--network bridge"` 可用，`--docker-param --network bridge` 不可用
 
 ##### 从本地 Dockerfile 构建
@@ -332,6 +332,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_GIT_USER_EMAIL` | 自动 | Git commit author 邮箱（如果未提供，默认为 `git config user.email`） |
 | `CODEMATE_CO_AUTHOR_BY` | 否 | Git commit skill 使用的 commit co-author，例如 `Name <email@example.com>` 或 `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | 否 | 自定义 image（默认：`ghcr.io/boringhappy/codemate:latest`） |
+| `CODEMATE_IMAGE_REGISTRY` | 否 | 内置镜像所用的镜像仓库（默认：`ghcr.io`）。设置后无需 `--image` 即可从 mirror 拉取 `codemate`/`codemate-pure`；显式指定的 `--image`、`CODEMATE_IMAGE` 或 `--build` 标签不会被替换 |
 | `CODEMATE_SKIP_PULL` | 否 | 启动时跳过 Docker 镜像拉取；仅当本地缺少镜像时才拉取 |
 | `CODEMATE_HOME` | 否 | 宿主机上的 CodeMate home 目录；支持 `~` 和 `$VAR` 展开（默认：`~/.codemate`） |
 | `CODEMATE_PURE_HOME` | 否 | `--pure` 会话使用的 home 目录；支持 `~` 和 `$VAR` 展开（默认：`CODEMATE_HOME` 路径加 `-pure` 后缀，例如 `~/.codemate-pure`） |

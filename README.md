@@ -134,8 +134,8 @@ codemate --build --branch feature/xyz
 # Build with custom Dockerfile path and tag
 codemate --build -f ./custom/Dockerfile --tag my-codemate:v1 --branch feature/xyz
 
-# For Chinese users: Use DaoCloud mirror for faster image pulls
-codemate --branch feature/xyz --image ghcr.m.daocloud.io/boringhappy/codemate:latest
+# For Chinese users: serve the built-in images from a mirror registry
+codemate --branch feature/xyz --image-registry ghcr.m.daocloud.io
 
 # Skip pulling the image on startup (use the local image if present)
 codemate --branch feature/xyz --skip-pull
@@ -201,7 +201,7 @@ What pure mode skips:
 Notes:
 
 - Pure mode never touches the standard `CODEMATE_HOME` (`~/.codemate`): the two homes are separate paths, so pure sessions have their own Claude/Codex credentials and settings. Set `CODEMATE_PURE_HOME` to move it elsewhere; it defaults to the standard home with a `-pure` suffix, so `CODEMATE_HOME=/data/codemate` implies `/data/codemate-pure`
-- `--image` and `--build` select the image in pure mode; `CODEMATE_IMAGE` from `.env` or the environment is ignored so a standard image setting does not leak into pure mode
+- `--image` and `--build` select the image in pure mode; `CODEMATE_IMAGE` from `.env` or the environment is ignored so a standard image setting does not leak into pure mode. The pure default follows `CODEMATE_IMAGE_REGISTRY`, just like the standard default
 - Use `--network <mode>` for Docker network modes. With `--docker-param`, keep a flag and its value in one quoted string: `--docker-param "--network bridge"` works, `--docker-param --network bridge` does not
 
 ##### Building from Local Dockerfile
@@ -304,6 +304,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_GIT_USER_EMAIL` | Auto | Git commit author email (defaults to `git config user.email` if not provided) |
 | `CODEMATE_CO_AUTHOR_BY` | No | Commit co-author used by the Git commit skill, e.g. `Name <email@example.com>` or `Co-authored-by: Name <email@example.com>` |
 | `CODEMATE_IMAGE` | No | Custom image (default: `ghcr.io/boringhappy/codemate:latest`) |
+| `CODEMATE_IMAGE_REGISTRY` | No | Registry serving the built-in images (default: `ghcr.io`). Set it to pull `codemate`/`codemate-pure` from a mirror without passing `--image`; an explicit `--image`, `CODEMATE_IMAGE`, or `--build` tag is never rewritten |
 | `CODEMATE_SKIP_PULL` | No | Skip pulling the Docker image at startup; the image is only pulled if it is missing locally |
 | `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
 | `CODEMATE_PURE_HOME` | No | Home directory used by `--pure` sessions; supports `~` and `$VAR` expansion (default: the `CODEMATE_HOME` path with a `-pure` suffix, e.g. `~/.codemate-pure`) |
