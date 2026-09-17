@@ -189,6 +189,7 @@ What pure mode does:
 - Mounts each top-level entry of its own home, `CODEMATE_PURE_HOME` (default `~/.codemate-pure`), at the matching path in `$HOME` (`.claude`, `.claude.json`, `.codex`). The pure home itself is not mounted, and it is created on first run and seeded with those entries, so logging in inside the container persists there
 - Mounts the current working directory at the path it has relative to your home directory (`~/code/projecta` → `/home/agent/code/projecta`) and starts there; directories outside the home fall back to `/home/agent/<directory-name>`
 - Runs the image's default command, `zsh`
+- Aliases `claude` and `codex` in `~/.zshrc` to their allow-all-permissions flags (`claude --dangerously-skip-permissions`, `codex --yolo`), so agents started from the shell skip approval prompts like the CodeMate launchers do
 - Keeps `--mount`, `--docker-param`, `--network`, `--image`, `--env`, `--env-file`, `--tz`, `--skip-pull`, and `--dry-run` available
 
 What pure mode skips:
