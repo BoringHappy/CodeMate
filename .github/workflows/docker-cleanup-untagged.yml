@@ -1,0 +1,49 @@
+name: Clean Up Untagged Images
+
+on:
+  schedule:
+    # Weekly on Sunday at 04:30 UTC, just after the weekly base image rebuild,
+    # so freshly rebuilt images are never candidates for deletion.
+    - cron: '30 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      older-than-days:
+        description: 'Delete untagged versions older than this many days'
+        required: false
+        default: '15'
+      packages:
+        description: 'Space separated package names to clean'
+        required: false
+        default: 'codemate codemate-base codemate-pure'
+      dry-run:
+        description: 'Only report what would be deleted'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # GITHUB_TOKEN can delete versions of packages published by this
+      # repository. If a package ever needs a different owner, pass a token
+      # with the `delete:packages` scope instead.
+      - name: Delete untagged package versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGES: ${{ inputs.packages }}
+          OLDER_THAN_DAYS: ${{ inputs.older-than-days }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: ./scripts/cleanup-ghcr-untagged.sh
