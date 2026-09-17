@@ -13,6 +13,10 @@ COPY --chmod=755 setup /usr/local/bin/setup
 ENV CODEMATE_DEFAULT_MARKETPLACES="BoringHappy/CodeMate"
 ENV CODEMATE_DEFAULT_PLUGINS="git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
+# Keep Claude Code from spending startup traffic on telemetry, auto-updates,
+# and other non-essential network calls inside the container.
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
 # Switch to agent user and install both supported coding agents.
 USER agent
 # Prefer npm-managed tools over any persisted standalone symlink in ~/.local/bin.

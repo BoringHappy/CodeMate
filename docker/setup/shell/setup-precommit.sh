@@ -4,17 +4,21 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# Determine workspace path the same way setup-repo.py does:
-# /home/agent/<repo_name>, where <repo_name> is derived from CODEMATE_GIT_REPO_URL.
+# Determine workspace path the same way setup-repo.py does: CODEMATE_REPO_DIR
+# (the host checkout path mirrored into the container) when set, otherwise
+# /home/agent/<repo_name> with <repo_name> derived from CODEMATE_GIT_REPO_URL.
 if [ -z "$CODEMATE_GIT_REPO_URL" ]; then
     printf "${BLUE}CODEMATE_GIT_REPO_URL not set, skipping pre-commit setup${RESET}\n"
     exit 0
 fi
 
-repo_url="${CODEMATE_GIT_REPO_URL%.git}"
-repo_url="${repo_url%/}"
-repo_name="${repo_url##*/}"
-workspace="/home/agent/${repo_name}"
+workspace="${CODEMATE_REPO_DIR:-}"
+if [ -z "$workspace" ]; then
+    repo_url="${CODEMATE_GIT_REPO_URL%.git}"
+    repo_url="${repo_url%/}"
+    repo_name="${repo_url##*/}"
+    workspace="/home/agent/${repo_name}"
+fi
 
 config_file="$workspace/.pre-commit-config.yaml"
 

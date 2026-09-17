@@ -21,7 +21,7 @@ codemate --pr 123
 # Run with custom volume mounts
 codemate --branch feature/xyz --mount /local/path:/container/path
 
-# Pure mode: no repository setup, no GitHub, no plugins - just zsh with ~/.codemate mounted
+# Pure mode: no repository setup, no GitHub, no plugins - just zsh with the local home and current directory mounted
 codemate --pure
 ```
 
@@ -30,7 +30,7 @@ Parameters:
 - `--branch` - Branch to work on
 - `--pr` - Existing PR number (alternative to --branch)
 - `--mount` - Additional volume mounts (can be specified multiple times)
-- `--pure` - Run the pure image with the entries of the pure CodeMate home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`, separate from the standard `CODEMATE_HOME`) and the current directory mounted, starting zsh instead of running setup (no target, GitHub token, or host `git`/`gh` required)
+- `--pure` - Run the pure image with the entries of the pure CodeMate home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`, separate from the standard `CODEMATE_HOME`) and the current directory mounted at its host path relative to `$HOME` (`~/code/projecta` -> `/home/agent/code/projecta`), starting zsh instead of running setup (no target, GitHub token, or host `git`/`gh` required)
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Parameters:
 1. The combined image uses `setup/setup.sh` for shared Git, GitHub, repository, pre-commit, and soft-link initialization.
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
-4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
+4. `setup/python/setup-repo.py` clones the repo into the workspace (`CODEMATE_REPO_DIR`: the host checkout path mirrored under `$HOME`, e.g. `~/code/projecta` -> `/home/agent/code/projecta`), checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
 6. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. PR monitoring runs from the workspace plugin's native Stop hook.
 

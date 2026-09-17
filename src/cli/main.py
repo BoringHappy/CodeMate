@@ -28,6 +28,9 @@ DEFAULT_DOCKERFILE = "docker/Dockerfile"
 DEFAULT_PURE_DOCKERFILE = "docker/Dockerfile.pure"
 DEFAULT_TAG = "codemate:local"
 DEFAULT_PURE_TAG = "codemate-pure:local"
+# Home directory inside the container; host paths under the host home are
+# mirrored below it so both sides agree on the workspace layout.
+CONTAINER_HOME = "/home/agent"
 # Docker flags that take a value and therefore must not be passed alone.
 DOCKER_VALUE_FLAGS = ("--network",)
 DEFAULT_MARKETPLACES = "BoringHappy/CodeMate"
@@ -135,6 +138,10 @@ def is_pure(args: SimpleNamespace) -> bool:
 
 def git_remote() -> str:
     return run_capture(["git", "config", "--get", "remote.origin.url"])
+
+
+def git_toplevel() -> str:
+    return run_capture(["git", "rev-parse", "--show-toplevel"])
 
 
 def git_user_name() -> str:
@@ -382,6 +389,57 @@ def sanitized(text: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "_-" else "-" for ch in text)
 
 
+def container_workspace_path(host_dir: Path, fallback_name: str = "") -> str:
+    """Path inside the container that mirrors a host directory.
+
+    A directory inside the host home keeps its layout relative to that home
+    (``$HOME/code/projecta`` -> ``/home/agent/code/projecta``), so the agent
+    sees the same relative paths it does on the host. The home itself and
+    anything outside it fall back to a single directory named after
+    ``fallback_name`` (or the host directory) instead of mirroring a path
+    that would swallow the agent's own home state.
+    """
+    host_home = Path(os.path.expanduser("~")).resolve()
+    try:
+        relative = host_dir.resolve().relative_to(host_home)
+    except ValueError:
+        relative = Path()
+    if relative.parts:
+        return f"{CONTAINER_HOME}/{relative.as_posix()}"
+    name = sanitized(fallback_name or host_dir.name) or "workspace"
+    return f"{CONTAINER_HOME}/{name}"
+
+
+def host_workspace_root() -> Path:
+    """Host directory whose layout the container workspace mirrors.
+
+    Inside a git work tree the repository root wins, so launching from a
+    subdirectory still mirrors the checkout rather than the subdirectory;
+    anything else mirrors the current directory.
+    """
+    toplevel = git_toplevel()
+    return Path(toplevel) if toplevel else Path.cwd()
+
+
+def standard_workspace_path(config: Mapping[str, ResolvedValue]) -> str:
+    """Container workspace path for the standard (repository) image."""
+    fallback = repo_name(value(config, "CODEMATE_GIT_REPO_URL"))
+    return container_workspace_path(host_workspace_root(), fallback)
+
+
+def workspace_defaults(config: Dict[str, ResolvedValue]) -> None:
+    """Mirror the host checkout path into the container workspace.
+
+    An explicit CODEMATE_REPO_DIR wins, so the previous
+    ``/home/agent/<repo-name>`` layout stays available for anyone who needs it.
+    """
+    if value(config, "CODEMATE_REPO_DIR"):
+        return
+    config["CODEMATE_REPO_DIR"] = ResolvedValue(
+        standard_workspace_path(config), "derived", FIELD_BY_NAME["CODEMATE_REPO_DIR"]
+    )
+
+
 def split_words(text: str) -> List[str]:
     return shlex.split(text) if text else []
 
@@ -440,6 +498,7 @@ def print_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamesp
     if value(config, "CODEMATE_SKIP_PULL"):
         table.add_row("Image pull", "skipped")
     table.add_row("Repository", repo_name(value(config, "CODEMATE_GIT_REPO_URL")))
+    table.add_row("Workspace", value(config, "CODEMATE_REPO_DIR") or standard_workspace_path(config))
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
     table.add_row("Timezone", value(config, "TZ"))
     if config["CODEMATE_DEFAULT_MARKETPLACES"].source != "default":
@@ -664,6 +723,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
     if Path("skills").is_dir():
         volume_args.extend(["-v", f"{Path.cwd() / 'skills'}:/home/agent/.claude/skills"])
     volume_args.extend(custom_mount_args(config, args))
+    workspace = value(config, "CODEMATE_REPO_DIR") or standard_workspace_path(config)
 
     command = [
         "docker",
@@ -681,7 +741,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         "--env-file",
         env_path,
         "-w",
-        f"/home/agent/{repo}",
+        workspace,
         value(config, "CODEMATE_IMAGE"),
     ]
     if args.shell:
@@ -706,29 +766,27 @@ def pure_image(config: Mapping[str, ResolvedValue]) -> str:
     return default_image(value(config, "CODEMATE_IMAGE_REGISTRY"), DEFAULT_PURE_IMAGE_REPOSITORY)
 
 
-def pure_workspace_name() -> str:
-    return sanitized(Path.cwd().name) or "workspace"
-
-
 def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, env_path: str) -> List[str]:
     """Run the pure image with the local pure CodeMate home mounted.
 
     There is no repository clone, no agent launcher, and no GitHub setup: the
     container starts the image's default command (zsh) in the current working
-    directory, which is mounted read-write into the container. Only the
-    entries of the pure home (~/.codemate-pure by default) are mounted into
-    $HOME, so pure sessions keep their own credentials and config without
-    sharing ~/.codemate or exposing the pure home itself.
+    directory, which is mounted read-write into the container at the path it
+    has relative to the host home. Only the entries of the pure home
+    (~/.codemate-pure by default) are mounted into $HOME, so pure sessions keep
+    their own credentials and config without sharing ~/.codemate or exposing
+    the pure home itself.
     """
-    workspace = pure_workspace_name()
-    container_name = f"codemate-pure-{workspace}"
+    workspace = container_workspace_path(Path.cwd())
+    workspace_key = sanitized(workspace.removeprefix(f"{CONTAINER_HOME}/")) or "workspace"
+    container_name = f"codemate-pure-{workspace_key}"
     attach = attach_if_running(container_name, args)
     if attach:
         return attach
 
     docker_params = resolved_docker_params(config, args)
     volume_args = home_entry_volume_args(ensure_pure_home())
-    volume_args.extend(["-v", f"{Path.cwd()}:/home/agent/{workspace}"])
+    volume_args.extend(["-v", f"{Path.cwd()}:{workspace}"])
     volume_args.extend(custom_mount_args(config, args))
 
     return [
@@ -747,13 +805,13 @@ def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespa
         "--env-file",
         env_path,
         "-w",
-        f"/home/agent/{workspace}",
+        workspace,
         value(config, "CODEMATE_IMAGE"),
     ]
 
 
 def print_pure_launch_details(config: Mapping[str, ResolvedValue], args: SimpleNamespace) -> None:
-    workspace = pure_workspace_name()
+    workspace = container_workspace_path(Path.cwd())
     mounts = args.mount or split_words(value(config, "CODEMATE_MOUNTS"))
     docker_params_text = inline_detail_list(resolved_docker_params(config, args))
     extra_env_keys = sorted(key for key, item in config.items() if item.field is None)
@@ -766,7 +824,7 @@ def print_pure_launch_details(config: Mapping[str, ResolvedValue], args: SimpleN
     table.add_row("Mode", "pure (zsh, no repository setup)")
     table.add_row("Image", value(config, "CODEMATE_IMAGE"))
     table.add_row("Home dir", str(pure_home()))
-    table.add_row("Workspace", f"{Path.cwd()} → /home/agent/{workspace}")
+    table.add_row("Workspace", f"{Path.cwd()} → {workspace}")
     if value(config, "CODEMATE_SKIP_PULL"):
         table.add_row("Image pull", "skipped")
     table.add_row("Timezone", value(config, "TZ"))
@@ -818,6 +876,7 @@ def run_codemate(args: SimpleNamespace) -> None:
 
     if not pure:
         issue_defaults(config)
+        workspace_defaults(config)
 
     if args.config:
         print_config(config)
