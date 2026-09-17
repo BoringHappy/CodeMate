@@ -39,7 +39,7 @@ Parameters:
 1. The combined image uses `setup/setup.sh` for shared Git, GitHub, repository, pre-commit, and soft-link initialization.
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
-4. `setup/python/setup-repo.py` clones the repo into the workspace (`CODEMATE_REPO_DIR`: the host checkout path mirrored under `$HOME`, e.g. `~/code/projecta` -> `/home/agent/code/projecta`), checks out branch/PR, creates PR if needed
+4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
 6. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. PR monitoring runs from the workspace plugin's native Stop hook.
 

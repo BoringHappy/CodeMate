@@ -308,7 +308,6 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_SKIP_PULL` | No | Skip pulling the Docker image at startup; the image is only pulled if it is missing locally |
 | `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
 | `CODEMATE_PURE_HOME` | No | Home directory used by `--pure` sessions; supports `~` and `$VAR` expansion (default: the `CODEMATE_HOME` path with a `-pure` suffix, e.g. `~/.codemate-pure`) |
-| `CODEMATE_REPO_DIR` | Auto | Container path of the workspace. Defaults to the host checkout path mirrored under `$HOME` (`~/code/projecta` → `/home/agent/code/projecta`), or `/home/agent/<repo-name>` when the checkout is outside the home; set it to pin a different location |
 | `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
 | `CODEMATE_INSTANCE_ID` | No | Runtime instance namespace used to distinguish concurrent agent processes |
 | `CODEMATE_RUNTIME_DIR` | No | Override the root for session-scoped hook state (defaults to `$XDG_RUNTIME_DIR/codemate` or `/tmp/codemate-<uid>`) |
@@ -336,15 +335,13 @@ CodeMate uses a separate [base image (`codemate-base`)](https://github.com/Borin
 On startup, the container:
 1. Configures git user from environment variables
 2. Authenticates GitHub CLI with token
-3. Clones/updates the repository into the workspace: the host checkout path mirrored under `$HOME` (`~/code/projecta` → `/home/agent/code/projecta`), falling back to `/home/agent/<repo-name>` outside the home
+3. Clones/updates repository to `/home/agent/<repo-name>`
 4. Checks out the specified branch or PR
 5. Creates a draft PR if working on a new branch (unless `--no-pr`, `--chat`, or fork workflow)
 6. Installs/updates plugins for the selected agent from configured marketplaces
 7. Starts Claude Code or Codex directly with the initial query as a native initial prompt, appending CodeMate instructions unless chat mode is enabled
 8. Sends the initial query to the selected agent if `--query` is provided
 9. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
-
-Both modes place the workspace at the host path relative to your home directory, so a checkout in `~/code/projecta` runs at `/home/agent/code/projecta` whether the standard image clones it or `--pure` bind-mounts it.
 
 With `--shell`, the container runs steps 1-5 and then opens an interactive zsh shell instead of installing agent plugins and starting Claude Code or Codex.
 

@@ -89,20 +89,15 @@ def main():
 
     # Extract repo name from git URL
     repo_name = get_repo_name_from_url(git_repo_url)
-    # The CLI mirrors the host checkout path into the container (for example
-    # /home/agent/code/projecta); fall back to /home/agent/<repo_name> when the
-    # variable is unset, e.g. for containers started without the CodeMate CLI.
-    workspace = os.getenv("CODEMATE_REPO_DIR", "").strip() or f"/home/agent/{repo_name}"
-    safe_workspace = shlex.quote(workspace)
+    workspace = f"/home/agent/{repo_name}"
 
-    # Create the workspace when it does not exist yet and hand it to the agent
-    # user, whose clone runs below.
-    run(f"sudo mkdir -p {safe_workspace}", check=False)
-    run(f"sudo chown -R agent:agent {safe_workspace}", check=False)
+    # Ensure agent user has permission to the workspace directory
+    run(f"sudo chown -R agent:agent {workspace}", check=False)
 
     if not os.path.exists(f"{workspace}/.git"):
         print(f"  Cloning repository: {BLUE}{git_repo_url}{RESET}")
-        run(f"git clone {git_repo_url} {safe_workspace}")
+        os.chdir("/home/agent")
+        run(f"git clone {git_repo_url} {repo_name}")
         os.chdir(workspace)
     else:
         print(f"  Using existing repository")
