@@ -179,7 +179,7 @@ codemate --pure --network bridge --mount ~/data:/data --tz Asia/Shanghai
 Pure 模式会做：
 
 - 只把它的 home（`CODEMATE_PURE_HOME`，默认 `~/.codemate-pure`）中的顶层条目按同名路径挂载到 `$HOME`（`.claude`、`.claude.json`、`.codex`），不挂载 pure home 目录本身。pure home 会在首次运行时创建并预置这些条目，所以在容器里登录一次即可持久保存
-- 把当前工作目录挂载到 `/home/agent/<目录名>` 并作为工作目录
+- 把当前工作目录按它在宿主机 home 下的相对路径挂载（`~/code/projecta` → `/home/agent/code/projecta`）并作为工作目录；不在 home 下的目录则回退为 `/home/agent/<目录名>`
 - 执行镜像的默认命令 `zsh`
 - 仍然支持 `--mount`、`--docker-param`、`--network`、`--image`、`--env`、`--env-file`、`--tz`、`--skip-pull`、`--dry-run`
 

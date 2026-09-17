@@ -20,6 +20,9 @@ RUN chown -R agent:agent /usr/local/share/npm-global
 USER agent
 # Prefer npm-managed tools over any persisted standalone symlink in ~/.local/bin.
 ENV PATH="/usr/local/share/npm-global/bin:/home/agent/.local/bin:${PATH}"
+# Keep Claude Code from spending startup traffic on telemetry, auto-updates,
+# and other non-essential network calls inside the container.
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @openai/codex@latest \
     && claude --version \

@@ -187,7 +187,7 @@ codemate --pure --network bridge --mount ~/data:/data --tz America/New_York
 What pure mode does:
 
 - Mounts each top-level entry of its own home, `CODEMATE_PURE_HOME` (default `~/.codemate-pure`), at the matching path in `$HOME` (`.claude`, `.claude.json`, `.codex`). The pure home itself is not mounted, and it is created on first run and seeded with those entries, so logging in inside the container persists there
-- Mounts the current working directory at `/home/agent/<directory-name>` and starts there
+- Mounts the current working directory at the path it has relative to your home directory (`~/code/projecta` → `/home/agent/code/projecta`) and starts there; directories outside the home fall back to `/home/agent/<directory-name>`
 - Runs the image's default command, `zsh`
 - Keeps `--mount`, `--docker-param`, `--network`, `--image`, `--env`, `--env-file`, `--tz`, `--skip-pull`, and `--dry-run` available
 

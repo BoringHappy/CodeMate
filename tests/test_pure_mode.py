@@ -129,6 +129,57 @@ def test_pure_mode_mounts_the_working_directory_and_starts_zsh(codemate_home, tm
     assert cmd[-1] == main.DEFAULT_PURE_IMAGE
 
 
+def test_container_workspace_path_keeps_the_layout_under_the_home(monkeypatch, tmp_path) -> None:
+    home = tmp_path / "home"
+    project = home / "code" / "projecta"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    assert main.container_workspace_path(project) == "/home/agent/code/projecta"
+
+
+def test_container_workspace_path_falls_back_to_a_single_name(monkeypatch, tmp_path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    assert main.container_workspace_path(home) == "/home/agent/home"
+    assert main.container_workspace_path(outside) == "/home/agent/elsewhere"
+
+
+def test_pure_mode_mirrors_the_host_home_layout(codemate_home, tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    project = home / "code" / "projecta"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(project)
+
+    cmd = main.pure_docker_command(make_config(), make_args(), "/tmp/codemate.env")
+
+    assert f"{project}:/home/agent/code/projecta" in cmd
+    assert cmd[cmd.index("-w") + 1] == "/home/agent/code/projecta"
+    assert cmd[cmd.index("--name") + 1] == "codemate-pure-code-projecta"
+
+
+def test_standard_mode_workspace_path_is_unchanged(codemate_home, tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    project = home / "code" / "projecta"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(project)
+
+    cmd = main.docker_command(
+        make_config(CODEMATE_GIT_REPO_URL="https://github.com/BoringHappy/CodeMate.git", CODEMATE_BRANCH_NAME="main"),
+        make_args(pure=False, shell=True),
+        "/tmp/codemate.env",
+    )
+
+    assert cmd[cmd.index("-w") + 1] == "/home/agent/CodeMate"
+    assert "/home/agent/code/projecta" not in cmd
+
+
 def test_pure_mode_uses_a_dedicated_container_name(codemate_home, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
