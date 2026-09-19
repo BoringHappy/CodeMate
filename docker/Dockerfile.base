@@ -9,6 +9,10 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=/home/agent/.local/bin:/usr/local/share/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+# Advertise 24-bit color to the CLI tools inside the container (zsh, vim,
+# ripgrep, fzf, less, tmux). Docker does not forward the host COLORTERM, so
+# without this default those tools fall back to 256-color approximations.
+ENV COLORTERM=truecolor
 
 # Create non-root user and configure system
 RUN set -ex \
