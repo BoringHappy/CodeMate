@@ -40,6 +40,7 @@ RUN set -euxo pipefail \
     && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -yy --no-install-recommends --fix-missing \
         bc \
+        bubblewrap \
         build-essential \
         cmake \
         dnsutils \
