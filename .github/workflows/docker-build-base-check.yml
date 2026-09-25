@@ -56,6 +56,7 @@ jobs:
         run: |
           set -euxo pipefail
           docker run --rm codemate-base:pr-check bash -euxc '
+            bwrap --version
             kubectl version --client --output=yaml
             helm version --short
             playwright --version
