@@ -165,6 +165,15 @@ The setup command will:
 3. Current directory's git remote origin URL (auto-detected)
 4. If none are available, an error is raised
 
+##### Codex Terminal Mode
+
+The `--agent codex` launcher (including `--chat`) runs `codex --yolo --no-daemon --no-alt-screen`:
+
+- `--no-daemon` explicitly selects embedded mode. CodeMate injects workflow instructions with `--config developer_instructions=...`, which requires embedded mode; this avoids the `Running without the shared background server: command-line configuration overrides ... requires embedded mode` fallback notice.
+- `--no-alt-screen` uses inline mode with native terminal scrollback. Codex CLI 0.157.0 enabled fullscreen transcripts and automatic background-server startup by default for eligible sessions; these are separate features, not an extra container or tmux session. See the [official OpenAI changelog](https://learn.chatgpt.com/docs/changelog).
+
+When starting Codex manually from `--shell` or `--pure`, use `codex --yolo --no-daemon --no-alt-screen` for the same behavior. Docker detach and reattach remain available through `Ctrl+P Ctrl+Q` and re-running `codemate`.
+
 ##### Custom Volume Mounts
 
 Use `--mount <host-path>:<container-path>` to mount additional directories or files. Useful for sharing data, configurations, or credentials with the container. Multiple `--mount` options can be specified.

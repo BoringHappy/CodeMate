@@ -157,6 +157,15 @@ codemate --branch feature/xyz --tz Asia/Shanghai
 3. 当前目录的 git remote origin URL（自动检测）
 4. 如果都不可用，则报错
 
+##### Codex 终端模式
+
+`--agent codex` 启动器（包括 `--chat`）使用 `codex --yolo --no-daemon --no-alt-screen`：
+
+- `--no-daemon` 显式选择 embedded 模式。CodeMate 通过 `--config developer_instructions=...` 注入工作流指令，需要 embedded 模式；显式指定后可避免 `Running without the shared background server: command-line configuration overrides ... requires embedded mode` 这条自动回退提示。
+- `--no-alt-screen` 使用 inline 模式，保留终端原生滚动历史。Codex CLI 0.157.0 默认启用了全屏界面，以及符合条件时自动启动后台服务；这是两个独立功能，并没有额外启动容器或 tmux 会话。参见 [OpenAI 官方更新记录](https://learn.chatgpt.com/docs/changelog)。
+
+在 `--shell` 或 `--pure` 中手动启动 Codex 时，可使用 `codex --yolo --no-daemon --no-alt-screen` 获得相同行为。仍可通过 `Ctrl+P Ctrl+Q` 分离 Docker 终端，并重新运行 `codemate` 连接。
+
 ##### 自定义 volume 挂载
 
 使用 `--mount <主机路径>:<容器路径>` 挂载额外的目录或文件。适用于与容器共享数据、配置或凭证。可以指定多个 `--mount` 选项。
