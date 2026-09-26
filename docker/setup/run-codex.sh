@@ -15,7 +15,10 @@ printf "${GREEN}Starting CodeMate Codex...${RESET}\n"
 # native initial prompt (positional argument), so no tmux session is needed.
 # CodeMate already isolates Codex inside a disposable container, so Codex can
 # operate without a second sandbox or interactive approval prompts.
-CODEX_CMD=(codex --yolo)
+# Explicitly use embedded mode: the per-session --config instructions below
+# require it, and the container already owns the session lifecycle.
+# Keep native terminal scrollback instead of Codex's fullscreen TUI.
+CODEX_CMD=(codex --yolo --no-daemon --no-alt-screen)
 
 if [ -n "$CODEMATE_CHAT" ]; then
     printf "${CYAN}Chat mode enabled; skipping CodeMate Codex instructions${RESET}\n"
