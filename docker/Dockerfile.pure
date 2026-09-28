@@ -1,16 +1,16 @@
 # CodeMate Pure - Claude Code and Codex in a plain zsh container
 #
-# Unlike docker/Dockerfile, this image performs no repository setup: there is
-# no setup entrypoint, no plugin marketplace, and no agent launcher. The
-# container starts an interactive zsh session and CodeMate mounts the host
-# ~/.codemate directory so existing Claude/Codex credentials and configs are
-# reused.
+# Unlike docker/Dockerfile, this image performs no repository setup and has
+# no plugin marketplace or agent launcher. After mapping the host identity,
+# it starts an interactive zsh session with the entries of ~/.codemate-pure
+# mounted so Claude/Codex credentials and configs persist between sessions.
 ARG BASE_IMAGE=ghcr.io/boringhappy/codemate-base:latest
 FROM ${BASE_IMAGE}
 
 # The base image already provides the non-root agent user, zsh, and the dev
 # toolchain; only the coding agents are installed here.
 USER root
+COPY --chmod=755 entrypoint.py /usr/local/bin/codemate-entrypoint
 
 # npm installs run as the agent user below, so make sure the shared npm prefix
 # is writable by it. Base images built before the ownership fix in
@@ -38,4 +38,7 @@ alias claude='claude --dangerously-skip-permissions'
 alias codex='codex --yolo'
 EOF
 
+# Only map the host identity; pure mode still skips all repository setup.
+USER root
+ENTRYPOINT ["/usr/local/bin/codemate-entrypoint"]
 CMD ["zsh"]

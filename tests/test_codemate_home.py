@@ -51,6 +51,8 @@ def test_setup_creates_files_in_custom_home(monkeypatch, tmp_path) -> None:
     main.create_setup_files(project)
     assert (custom / ".claude" / "settings.json").exists()
     assert (custom / ".claude.json").exists()
+    assert (custom / ".codex").is_dir()
+    assert f"{custom / '.codex'}:/home/agent/.codex" in main.home_entry_volume_args(custom)
     assert (project / ".env").exists()
 
 

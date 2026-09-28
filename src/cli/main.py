@@ -503,6 +503,7 @@ def create_setup_files(cwd: Path) -> None:
     config_dir = codemate_home()
     claude_dir = config_dir / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / ".codex").mkdir(exist_ok=True)
     (config_dir / ".claude.json").write_text("{}\n") if not (config_dir / ".claude.json").exists() else None
     settings = claude_dir / "settings.json"
     if not settings.exists():
@@ -644,6 +645,13 @@ def pull_args(config: Mapping[str, ResolvedValue]) -> List[str]:
     return ["--pull", "missing"] if value(config, "CODEMATE_SKIP_PULL") else ["--pull", "always"]
 
 
+def host_identity_args() -> List[str]:
+    """Let the image map agent to the user running this CLI on Unix hosts."""
+    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
+        return []
+    return ["--env", f"CODEMATE_UID={os.getuid()}", "--env", f"CODEMATE_GID={os.getgid()}"]
+
+
 def attach_if_running(container_name: str, args: SimpleNamespace) -> Optional[List[str]]:
     """Re-attach to a live session with the same container name.
 
@@ -704,6 +712,7 @@ def docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespace, e
         f"TZ={value(config, 'TZ')}",
         "--env-file",
         env_path,
+        *host_identity_args(),
         "-w",
         f"/home/agent/{repo}",
         value(config, "CODEMATE_IMAGE"),
@@ -768,6 +777,7 @@ def pure_docker_command(config: Mapping[str, ResolvedValue], args: SimpleNamespa
         f"TZ={value(config, 'TZ')}",
         "--env-file",
         env_path,
+        *host_identity_args(),
         "-w",
         workspace,
         value(config, "CODEMATE_IMAGE"),

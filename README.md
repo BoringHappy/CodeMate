@@ -151,7 +151,7 @@ codemate --branch feature/xyz --tz America/New_York
 ```
 
 The setup command will:
-1. Create global configuration in `CODEMATE_HOME` (default `~/.codemate/`; Claude config and settings)
+1. Create global configuration in `CODEMATE_HOME` (default `~/.codemate/`; Claude config and settings, plus a `.codex/` directory for persistent Codex credentials and config)
 2. Create project-specific `.env` file in your current directory
 3. Prompt you for Anthropic API token and other settings
 
@@ -177,6 +177,10 @@ When starting Codex manually from `--shell` or `--pure`, use `codex --yolo --no-
 ##### Custom Volume Mounts
 
 Use `--mount <host-path>:<container-path>` to mount additional directories or files. Useful for sharing data, configurations, or credentials with the container. Multiple `--mount` options can be specified.
+
+On Unix hosts, CodeMate automatically passes the current user's UID and primary GID to the standard, `--shell`, and `--pure` containers. The image updates the `agent` account before starting the session, keeping the username and `/home/agent` path. With a local Docker daemon without user namespace remapping, files created in bind mounts belong to your host user. The identity setup only updates ownership of image files; existing bind-mounted files retain their owners.
+
+Running CodeMate as root (UID 0), or on a host without Unix user IDs, keeps the image's default non-root `agent` identity. An existing container keeps its identity when reattached; recreate it to pick up a different user. This requires updated CodeMate images; custom images must support `CODEMATE_UID` and `CODEMATE_GID`. Remote Docker daemons and user namespace remapping may require separate ownership configuration. If an older session left mounted state owned by another UID, fix its host permissions before launching.
 
 ##### Pure Mode
 

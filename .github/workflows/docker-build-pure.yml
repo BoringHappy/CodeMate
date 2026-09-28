@@ -5,12 +5,14 @@ on:
     paths:
       - '.github/workflows/docker-build-pure.yml'
       - 'docker/Dockerfile.pure'
+      - 'docker/entrypoint.py'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/docker-build-pure.yml'
       - 'docker/Dockerfile.pure'
+      - 'docker/entrypoint.py'
   workflow_dispatch:
 
 concurrency:
@@ -81,3 +83,29 @@ jobs:
           # (ghcr.io/<owner>/<repo>-pure:pr-<number>).
           image="$(printf '%s\n' '${{ steps.meta.outputs.tags }}' | head -n1)"
           docker run --rm "$image" zsh -lc 'command -v zsh && claude --version && codex --version'
+
+      - name: Smoke test — host identity and bind mount ownership
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euxo pipefail
+          image="$(printf '%s\n' '${{ steps.meta.outputs.tags }}' | head -n1)"
+          workspace="$(mktemp -d)"
+          sudo chown 12345:20 "$workspace"
+          sudo touch "$workspace/keep-owner"
+          sudo chown 1000:1000 "$workspace/keep-owner"
+          docker run --rm -e CODEMATE_UID=12345 -e CODEMATE_GID=20 \
+            -v "$workspace:/home/agent/workspace" -w /home/agent/workspace \
+            "$image" zsh -lc '
+              set -eu
+              test "$(id -u)" = 12345
+              test "$(id -g)" = 20
+              test "$(whoami)" = agent
+              test "$HOME" = /home/agent
+              test -w /home/agent/.local
+              test -w /usr/local/share/npm-global
+              test "$(stat -c %u:%g keep-owner)" = 1000:1000
+              touch created-in-container
+              claude --version
+              codex --version
+            '
+          test "$(sudo stat -c %u:%g "$workspace/created-in-container")" = 12345:20
