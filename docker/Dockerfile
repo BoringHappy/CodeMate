@@ -8,6 +8,7 @@ USER root
 
 # Copy setup scripts as root (755 allows agent user to read/execute)
 COPY --chmod=755 setup /usr/local/bin/setup
+COPY --chmod=755 entrypoint.py /usr/local/bin/codemate-entrypoint
 
 # Environment variables for plugin configuration
 ENV CODEMATE_DEFAULT_MARKETPLACES="BoringHappy/CodeMate"
@@ -25,5 +26,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @cometix/ccline @openai/codex@latest \
     && codex --version
 
-ENTRYPOINT ["/usr/local/bin/setup/setup.sh"]
+# Map the host identity before dropping privileges and running repository setup.
+USER root
+ENTRYPOINT ["/usr/local/bin/codemate-entrypoint", "/usr/local/bin/setup/setup.sh"]
 CMD ["/usr/local/bin/setup/run.sh"]

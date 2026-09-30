@@ -143,7 +143,7 @@ codemate --branch feature/xyz --tz Asia/Shanghai
 ```
 
 设置命令将：
-1. 在 `CODEMATE_HOME` 创建全局配置（默认 `~/.codemate/`；Claude 配置和设置）
+1. 在 `CODEMATE_HOME` 创建全局配置（默认 `~/.codemate/`；Claude 配置和设置，以及用于持久保存 Codex 凭证和配置的 `.codex/` 目录）
 2. 在当前目录创建项目特定的 `.env` 文件
 3. 提示你输入 Anthropic API token 和其他设置
 
@@ -169,6 +169,10 @@ codemate --branch feature/xyz --tz Asia/Shanghai
 ##### 自定义 volume 挂载
 
 使用 `--mount <主机路径>:<容器路径>` 挂载额外的目录或文件。适用于与容器共享数据、配置或凭证。可以指定多个 `--mount` 选项。
+
+在 Unix 主机上，CodeMate 会自动将当前用户的 UID 和主 GID 传入普通、`--shell` 和 `--pure` 容器。镜像在启动会话前更新 `agent` 账户，保留用户名和 `/home/agent` 路径。使用未开启用户命名空间映射的本地 Docker 时，容器在绑定挂载目录中新建的文件归宿主机当前用户所有。用户初始化只调整镜像内文件的属主，已挂载的文件保留原属主。
+
+以 root（UID 0）运行 CodeMate，或宿主机没有 Unix 用户 ID 时，容器保留镜像默认的非 root `agent` 身份。重新连接已有容器时身份不变，需要重建容器才能使用新的用户 ID。此功能需要更新后的 CodeMate 镜像；自定义镜像需支持 `CODEMATE_UID` 和 `CODEMATE_GID`。远程 Docker 和用户命名空间映射可能需要单独配置文件权限。如果旧会话留下了其他 UID 所有的挂载文件，请先修复宿主机上的权限。
 
 ##### Pure 模式
 

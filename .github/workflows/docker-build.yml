@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/docker-build.yml'
       - 'docker/Dockerfile'
+      - 'docker/entrypoint.py'
       - 'docker/setup/**'
   push:
     branches:
