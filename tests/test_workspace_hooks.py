@@ -169,6 +169,7 @@ def test_agent_hook_configs_use_supported_stop_delivery() -> None:
 
     assert len(codex_stop) == 1
     assert codex_stop[0]["command"].endswith("/hooks/stop.sh")
+    assert codex_stop[0]["timeout"] == 30
     assert "asyncRewake" not in codex_stop[0]
     assert len(claude_stop) == 2
     assert claude_stop[1]["command"].endswith("/hooks/claude_stop.sh")
@@ -575,7 +576,7 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     assert len(call_log.read_text().splitlines()) == 4
 
 
-@pytest.mark.parametrize("prompt_source", ["history", "queue"])
+@pytest.mark.parametrize("prompt_source", ["history", "same-second-history", "queue"])
 def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path, prompt_source: str) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
@@ -590,7 +591,7 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path, prompt_
     write_gh(fake_bin, 47, draft=True)
 
     history = codex_home / "history.jsonl"
-    if prompt_source == "history":
+    if prompt_source != "queue":
         history.write_text(json.dumps({"session_id": "pending-prompt-session", "ts": 100}) + "\n")
     else:
         write_codex_queue(codex_home, "another-session")
@@ -631,8 +632,9 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path, prompt_
             raise AssertionError("monitor did not complete its immediate poll")
 
         # Queuing does not submit a prompt or change session status/history.
-        if prompt_source == "history":
-            history.write_text(history.read_text() + json.dumps({"session_id": "pending-prompt-session", "ts": 200}) + "\n")
+        if prompt_source != "queue":
+            timestamp = 100 if prompt_source == "same-second-history" else 200
+            history.write_text(history.read_text() + json.dumps({"session_id": "pending-prompt-session", "ts": timestamp}) + "\n")
         else:
             write_codex_queue(codex_home, "pending-prompt-session")
         stdout, stderr = process.communicate(timeout=3)
@@ -810,6 +812,7 @@ def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
         "CODEMATE_AGENT": "codex",
         "CODEMATE_RUNTIME_DIR": str(runtime),
         "CODEMATE_MONITOR_DELAYS": "0",
+        "CODEMATE_MONITOR_MAX_SECONDS": "0",
         "CODEMATE_TEST_GH_LOG": str(call_log),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
@@ -823,6 +826,50 @@ def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
     # One query-first `pr list` resolution, then per poll:
     # pr view + issue comments + review comments.
     assert len(call_log.read_text().splitlines()) == 1 + 30 * 3
+
+
+@pytest.mark.parametrize("max_seconds", [None, "2"])
+def test_codex_monitor_yields_without_a_visible_pending_prompt(tmp_path: Path, max_seconds: str | None) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    codex_home = tmp_path / "codex-home"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    codex_home.mkdir()
+    init_repo(repo)
+    write_gh(fake_bin, 48, draft=True)
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEX_HOME": str(codex_home),
+        "CODEX_SQLITE_HOME": str(codex_home),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    env.pop("CODEMATE_MONITOR_MAX_SECONDS", None)
+    env.pop("CODEMATE_MONITOR_DELAYS", None)
+    if max_seconds is not None:
+        env["CODEMATE_MONITOR_MAX_SECONDS"] = max_seconds
+    stop = hook_input("cli-local-queue-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+
+    # A CLI Tab queue is private to the TUI: status stays Stop, and no queue or
+    # history entry becomes visible to this synchronous hook.
+    result = subprocess.run(
+        [str(HOOKS / "monitor_pr.sh")], cwd=repo, env=env,
+        input=json.dumps(stop), text=True, capture_output=True, check=True, timeout=8,
+    )
+
+    assert result.stdout == result.stderr == ""
+    assert len(call_log.read_text().splitlines()) == 4
+    monitor_log = next(runtime.glob("sessions/*/workspaces/*/pr-monitor.log"))
+    assert f"Monitor time limit reached ({max_seconds or '5'}s)" in monitor_log.read_text()
+    status = next(runtime.glob("sessions/*/status.json"))
+    assert json.loads(status.read_text())["event"] == "Stop"
+    assert not list(codex_home.iterdir())
 
 
 def test_review_comment_cursor_only_advances_past_delivered_batch(tmp_path: Path) -> None:

@@ -251,49 +251,41 @@ codemate_runtime_is_identified() {
     return 1
 }
 
-# Prints the newest user-prompt timestamp recorded for a session, or 0 when
-# the agent keeps no readable prompt history. Codex timestamps are epoch
-# seconds; Claude uses epoch milliseconds. When the runtime cannot be
-# identified, both histories are checked so a machine with Codex and Claude
-# installed side by side never mistakes one runtime's prompts for the other's.
-codemate_latest_prompt_ts() {
-    local session_id="$1" history_file latest ts codex_file claude_file
-    latest=""
+# Counts submitted prompts for this session. Codex history timestamps have
+# second-level precision, so comparing timestamps can miss a second prompt
+# submitted in the same second. Unidentified runtimes consult both histories.
+codemate_prompt_history_count() {
+    local session_id="$1" history_file count=0 file_count
+    local -a history_files=()
 
     if codemate_runtime_is_identified; then
         history_file=$(codemate_prompt_history_file) || { printf '0\n'; return 0; }
-        if codemate_is_codex; then
-            latest=$(jq -r --arg sid "$session_id" 'select(.session_id == $sid) | .ts' "$history_file" 2>/dev/null | tail -1) || true
-        else
-            latest=$(jq -r --arg sid "$session_id" 'select(.sessionId == $sid) | .timestamp' "$history_file" 2>/dev/null | tail -1) || true
-        fi
+        history_files=("$history_file")
     else
-        codex_file="${CODEX_HOME:-${HOME:-}/.codex}/history.jsonl"
-        claude_file="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/history.jsonl"
-        if [ -f "$codex_file" ]; then
-            ts=$(jq -r --arg sid "$session_id" 'select(.session_id == $sid) | .ts' "$codex_file" 2>/dev/null | tail -1) || true
-            [ -n "$ts" ] && [ "$ts" -gt "${latest:-0}" ] 2>/dev/null && latest="$ts"
-        fi
-        if [ -f "$claude_file" ]; then
-            ts=$(jq -r --arg sid "$session_id" 'select(.sessionId == $sid) | .timestamp' "$claude_file" 2>/dev/null | tail -1) || true
-            [ -n "$ts" ] && [ "$ts" -gt "${latest:-0}" ] 2>/dev/null && latest="$ts"
-        fi
+        history_files=(
+            "${CODEX_HOME:-${HOME:-}/.codex}/history.jsonl"
+            "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/history.jsonl"
+        )
     fi
 
-    if [ -n "$latest" ] && [ "$latest" -ge 0 ] 2>/dev/null; then
-        printf '%s\n' "$latest"
-    else
-        printf '0\n'
-    fi
-    return 0
+    for history_file in "${history_files[@]}"; do
+        [ -f "$history_file" ] || continue
+        file_count=$(jq -n --arg sid "$session_id" '
+            reduce inputs as $entry (0;
+                if ($entry.session_id // $entry.sessionId) == $sid then . + 1 else . end
+            )
+        ' "$history_file" 2>/dev/null) || file_count=0
+        count=$((count + file_count))
+    done
+    printf '%s\n' "$count"
 }
 
-# Returns 0 when a user prompt newer than the baseline has been recorded for
+# Returns 0 when another user prompt has been recorded since the baseline for
 # the session, meaning the user is waiting and Stop hooks should stop polling.
 codemate_has_new_prompt() {
-    local session_id="$1" baseline_ts="$2" current_ts
-    current_ts=$(codemate_latest_prompt_ts "$session_id") || current_ts=0
-    [ "$current_ts" != "0" ] && [ "$current_ts" -gt "$baseline_ts" ] 2>/dev/null
+    local session_id="$1" baseline_count="$2" current_count
+    current_count=$(codemate_prompt_history_count "$session_id") || current_count=0
+    [ "$current_count" -gt "$baseline_count" ] 2>/dev/null
 }
 
 codemate_truthy() {

@@ -21,8 +21,10 @@ LAST_CI_FAILURE_SIGNATURE=""
 CONSECUTIVE_FAILURES=0
 ACTION_MESSAGE=""
 MAX_POLLS=30
+MAX_MONITOR_SECONDS=0
+MONITOR_START_SECONDS=0
 SESSION_ID=""
-PROMPT_BASELINE_TS=0
+PROMPT_BASELINE_COUNT=0
 NEW_PROMPT_LOGGED=false
 
 log_monitor() {
@@ -83,7 +85,12 @@ acquire_branch_monitor() {
 
 session_can_poll() {
     codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || return 1
-    if codemate_has_new_prompt "$SESSION_ID" "$PROMPT_BASELINE_TS"; then
+    if [ "$MAX_MONITOR_SECONDS" -gt 0 ] && \
+        [ "$((SECONDS - MONITOR_START_SECONDS))" -ge "$MAX_MONITOR_SECONDS" ]; then
+        log_monitor "Monitor time limit reached (${MAX_MONITOR_SECONDS}s); yielding to message flow"
+        return 1
+    fi
+    if codemate_has_new_prompt "$SESSION_ID" "$PROMPT_BASELINE_COUNT"; then
         if [ "$NEW_PROMPT_LOGGED" != "true" ]; then
             NEW_PROMPT_LOGGED=true
             log_monitor "New user prompt detected; monitor exiting"
@@ -363,8 +370,18 @@ main() {
     fi
 
     SESSION_ID=$(codemate_session_id "$HOOK_INPUT") || exit 0
-    PROMPT_BASELINE_TS=$(codemate_latest_prompt_ts "$SESSION_ID")
+    PROMPT_BASELINE_COUNT=$(codemate_prompt_history_count "$SESSION_ID")
     NEW_PROMPT_LOGGED=false
+
+    # CLI Tab inputs stay in the TUI's memory until this turn finishes, so
+    # neither UserPromptSubmit, history nor the persistent queue can expose
+    # them here. Bound Codex's synchronous monitor so Stop releases the turn.
+    # Claude's asyncRewake monitor can keep polling in the background.
+    codemate_is_codex && MAX_MONITOR_SECONDS=5
+    if [[ "${CODEMATE_MONITOR_MAX_SECONDS:-}" =~ ^[0-9]+$ ]]; then
+        MAX_MONITOR_SECONDS=$((10#$CODEMATE_MONITOR_MAX_SECONDS))
+    fi
+    MONITOR_START_SECONDS=$SECONDS
 
     session_can_poll || exit 0
     MONITOR_STATE_FILE=""
