@@ -29,7 +29,7 @@
           {
             "type": "command",
             "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/stop.sh",
-            "timeout": 604800,
+            "timeout": 30,
             "statusMessage": "Monitoring pull request feedback"
           }
         ]

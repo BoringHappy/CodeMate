@@ -78,6 +78,19 @@ agent (Claude Code or Codex), so plugins stay decoupled at the behavior layer.
   `CODEMATE_RUNTIME_DIR` → `CODEMATE_TMPDIR/codemate` →
   `$XDG_RUNTIME_DIR/codemate` → `${TMPDIR:-/tmp}/codemate-$(id -u)`.
 
+## PR Monitoring Window
+
+- Codex's synchronous Stop monitor checks immediately and yields after five
+  seconds. CLI Tab inputs stay in the TUI's memory until Stop finishes, so a
+  hook cannot directly detect that queue. Later PR feedback is checked at the
+  next Stop. Enter submissions are detected through prompt history or status;
+  persistent Codex queues are checked separately, scoped to the session.
+- Claude's background `asyncRewake` monitor keeps the existing polling schedule
+  and 30-poll limit.
+- `CODEMATE_MONITOR_MAX_SECONDS` overrides the monitor window for either
+  runtime; `0` disables that time limit. Codex's Stop handler has a separate
+  30-second timeout to bound slow commands across the dispatcher.
+
 ## Plugin Dependency Direction
 
 - `git` — base: commit/push.

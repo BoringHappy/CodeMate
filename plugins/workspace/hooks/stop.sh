@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/hook_common.sh"
 
 HOOK_INPUT=$(cat)
 SESSION_DIR=$(codemate_session_dir "$HOOK_INPUT") || exit 0
+EVENT_FINGERPRINT=$(codemate_event_fingerprint "$HOOK_INPUT") || exit 0
 
 # A single dispatcher keeps Stop actions ordered. Codex launches matching hook
 # handlers concurrently, so separate handlers could otherwise race while
@@ -15,8 +16,10 @@ exec 9>"$SESSION_DIR/stop.lock"
 flock -w 5 9 || exit 0
 
 codemate_record_session_status "$HOOK_INPUT" || exit 0
+codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0
 
 git_check_output=$(printf '%s' "$HOOK_INPUT" | "$SCRIPT_DIR/check_git_changes.sh")
+codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0
 if [ -n "$git_check_output" ]; then
     printf '%s' "$git_check_output"
     exit 0
