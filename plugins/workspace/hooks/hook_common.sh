@@ -171,22 +171,59 @@ codemate_record_session_status() {
 codemate_session_is_stopped() {
     local session_dir="$1"
     local expected_fingerprint="${2:-}"
+    local session_id
 
     if [ -n "$expected_fingerprint" ]; then
-        jq -e --arg fingerprint "$expected_fingerprint" \
-            '.event == "Stop" and .event_fingerprint == $fingerprint' \
-            "$session_dir/status.json" >/dev/null 2>&1
+        session_id=$(jq -er --arg fingerprint "$expected_fingerprint" \
+            'select(.event == "Stop" and .event_fingerprint == $fingerprint) | .session_id' \
+            "$session_dir/status.json" 2>/dev/null) || return 1
     else
-        jq -e '.event == "Stop"' "$session_dir/status.json" >/dev/null 2>&1
+        session_id=$(jq -er 'select(.event == "Stop") | .session_id' \
+            "$session_dir/status.json" 2>/dev/null) || return 1
     fi
+
+    # Codex keeps queued messages separate from prompt history and does not
+    # submit them until the synchronous Stop hook lets this turn finish.
+    ! codemate_has_queued_prompt "$session_id"
+}
+
+codemate_has_queued_prompt() {
+    local session_id="$1" queue_file
+
+    if codemate_runtime_is_identified && ! codemate_is_codex; then
+        return 1
+    fi
+    queue_file="${CODEX_SQLITE_HOME:-${CODEX_HOME:-${HOME:-}/.codex}}/queue_1.sqlite"
+    [ -f "$queue_file" ] || return 1
+
+    # Only test for an item in this thread; never read prompt contents or
+    # modify Codex's queue. Missing/older schemas and busy databases fall back
+    # to the existing session-status and prompt-history checks.
+    python3 - "$queue_file" "$session_id" 2>/dev/null <<'PY'
+import sqlite3
+import sys
+from contextlib import closing
+from pathlib import Path
+
+try:
+    uri = Path(sys.argv[1]).resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.1)) as connection:
+        pending = connection.execute(
+            "SELECT 1 FROM queued_items WHERE thread_id = ? LIMIT 1",
+            (sys.argv[2],),
+        ).fetchone()
+except (OSError, sqlite3.Error):
+    sys.exit(1)
+sys.exit(0 if pending else 1)
+PY
 }
 
 codemate_prompt_history_file() {
     # Codex and Claude both record every user prompt in a history.jsonl:
     # Codex uses $CODEX_HOME/history.jsonl and Claude uses
     # $CLAUDE_CONFIG_DIR/history.jsonl. A new entry is appended as soon as the
-    # user submits a message, so Stop hooks can notice a pending prompt even
-    # while the agent session is still blocked finishing the previous turn.
+    # user submits a message. Codex's pending queue is checked separately
+    # because queued messages have not yet been submitted.
     local agent codex_file claude_file
     codex_file="${CODEX_HOME:-${HOME:-}/.codex}/history.jsonl"
     claude_file="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/history.jsonl"

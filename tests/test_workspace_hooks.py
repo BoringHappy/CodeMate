@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,6 +128,27 @@ def monitor_state_path(runtime: Path, repo: Path, branch: str = "feature/hooks")
     return runtime / "monitor" / f"{key}.monitor-state.json"
 
 
+def write_codex_queue(sqlite_home: Path, session_id: str) -> Path:
+    queue_file = sqlite_home / "queue_1.sqlite"
+    with sqlite3.connect(queue_file) as connection:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS queued_items (
+                id TEXT PRIMARY KEY NOT NULL,
+                thread_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                queue_order INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO queued_items VALUES (?, ?, ?, 0, 100, 100)",
+            (f"item-{session_id}", session_id, '{"input":[]}'),
+        )
+    connection.close()
+    return queue_file
+
+
 def run_pr_status(*args: str, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(PR_STATUS), *args],
@@ -225,6 +249,105 @@ def test_stop_returns_native_continuation_and_scopes_retry_counter(tmp_path: Pat
     counters = list((runtime / "sessions").glob("*/workspaces/*/git-changes-block-count"))
     assert len(counters) == 1
     assert counters[0].read_text().strip() == "1"
+
+
+@pytest.mark.parametrize("separate_sqlite_home", [False, True])
+def test_stop_yields_to_an_existing_codex_queue(tmp_path: Path, separate_sqlite_home: bool) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    codex_home = tmp_path / "codex-home"
+    sqlite_home = tmp_path / "sqlite home #?" if separate_sqlite_home else codex_home
+    repo.mkdir()
+    codex_home.mkdir()
+    sqlite_home.mkdir(exist_ok=True)
+    init_repo(repo)
+    (repo / "tracked.txt").write_text("dirty\n")
+    queue_file = write_codex_queue(sqlite_home, "queued-session")
+    original_queue = queue_file.read_bytes()
+
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_NO_PR": "true",
+        "CODEX_HOME": str(codex_home),
+    }
+    env.pop("CODEX_SQLITE_HOME", None)
+    if separate_sqlite_home:
+        env["CODEX_SQLITE_HOME"] = str(sqlite_home)
+
+    result = run_hook("stop.sh", hook_input("queued-session", repo, "Stop"), cwd=repo, env=env)
+
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert not list(runtime.glob("sessions/*/workspaces/*/git-changes-block-count"))
+    assert queue_file.read_bytes() == original_queue
+    assert not (codex_home / "history.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    ("agent", "queued_session", "expected_stopped"),
+    [("codex", "same-session", False), ("codex", "another-session", True), ("claude", "same-session", True)],
+)
+def test_queued_prompts_are_scoped_by_agent_and_session(
+    tmp_path: Path, agent: str, queued_session: str, expected_stopped: bool
+) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    codex_home = tmp_path / "codex-home"
+    repo.mkdir()
+    codex_home.mkdir()
+    init_repo(repo)
+    write_codex_queue(codex_home, queued_session)
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": agent,
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEX_HOME": str(codex_home),
+        "CODEX_SQLITE_HOME": str(codex_home),
+    }
+    run_hook("record_session_status.sh", hook_input("same-session", repo, "Stop"), cwd=repo, env=env)
+    session_dir = next((runtime / "sessions").iterdir())
+
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1"; codemate_session_is_stopped "$2"', "bash", str(HOOKS / "hook_common.sh"), str(session_dir)],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == (0 if expected_stopped else 1)
+    assert result.stdout == result.stderr == ""
+
+
+@pytest.mark.parametrize("queue_state", ["missing", "corrupt", "older-schema"])
+def test_unavailable_codex_queue_preserves_stop_behavior(tmp_path: Path, queue_state: str) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    codex_home = tmp_path / "codex-home"
+    repo.mkdir()
+    codex_home.mkdir()
+    init_repo(repo)
+    (repo / "tracked.txt").write_text("dirty\n")
+    queue_file = codex_home / "queue_1.sqlite"
+    if queue_state == "corrupt":
+        queue_file.write_text("not a database")
+    elif queue_state == "older-schema":
+        with sqlite3.connect(queue_file) as connection:
+            connection.execute("CREATE TABLE legacy_queue (id TEXT)")
+        connection.close()
+    original_queue = queue_file.read_bytes() if queue_file.exists() else None
+    env = os.environ.copy() | {
+        "CODEMATE_AGENT": "codex",
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_NO_PR": "true",
+        "CODEX_HOME": str(codex_home),
+        "CODEX_SQLITE_HOME": str(codex_home),
+    }
+
+    result = run_hook("stop.sh", hook_input("fallback-session", repo, "Stop"), cwd=repo, env=env)
+
+    assert json.loads(result.stdout)["decision"] == "block"
+    assert result.stderr == ""
+    assert (queue_file.read_bytes() if queue_file.exists() else None) == original_queue
 
 
 def test_one_session_partitions_hook_state_by_repository_and_branch(tmp_path: Path) -> None:
@@ -452,7 +575,8 @@ def test_monitor_interrupts_backoff_when_its_session_resumes(tmp_path: Path) -> 
     assert len(call_log.read_text().splitlines()) == 4
 
 
-def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None:
+@pytest.mark.parametrize("prompt_source", ["history", "queue"])
+def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path, prompt_source: str) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
     fake_bin = tmp_path / "bin"
@@ -466,7 +590,10 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
     write_gh(fake_bin, 47, draft=True)
 
     history = codex_home / "history.jsonl"
-    history.write_text(json.dumps({"session_id": "pending-prompt-session", "ts": 100}) + "\n")
+    if prompt_source == "history":
+        history.write_text(json.dumps({"session_id": "pending-prompt-session", "ts": 100}) + "\n")
+    else:
+        write_codex_queue(codex_home, "another-session")
 
     env = os.environ.copy() | {
         "CODEMATE_AGENT": "codex",
@@ -476,6 +603,7 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
     env.pop("CODEMATE_NO_PR", None)
+    env.pop("CODEX_SQLITE_HOME", None)
     stop = hook_input("pending-prompt-session", repo, "Stop")
     run_hook("record_session_status.sh", stop, cwd=repo, env=env)
 
@@ -502,9 +630,11 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
         else:
             raise AssertionError("monitor did not complete its immediate poll")
 
-        # The user submits a new prompt: history.jsonl is appended while the
-        # Stop hook is still running and the session status has NOT changed.
-        history.write_text(history.read_text() + json.dumps({"session_id": "pending-prompt-session", "ts": 200}) + "\n")
+        # Queuing does not submit a prompt or change session status/history.
+        if prompt_source == "history":
+            history.write_text(history.read_text() + json.dumps({"session_id": "pending-prompt-session", "ts": 200}) + "\n")
+        else:
+            write_codex_queue(codex_home, "pending-prompt-session")
         stdout, stderr = process.communicate(timeout=3)
     finally:
         if process.poll() is None:
@@ -515,6 +645,11 @@ def test_monitor_exits_when_codex_user_prompt_is_pending(tmp_path: Path) -> None
     assert stdout == ""
     assert stderr == ""
     assert len(call_log.read_text().splitlines()) == 4
+    if prompt_source == "queue":
+        assert not history.exists()
+        with sqlite3.connect(codex_home / "queue_1.sqlite") as connection:
+            assert connection.execute("SELECT COUNT(*) FROM queued_items").fetchone()[0] == 2
+        connection.close()
 
 
 def test_monitor_exits_when_claude_user_prompt_is_pending(tmp_path: Path) -> None:
