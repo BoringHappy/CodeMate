@@ -80,16 +80,17 @@ agent (Claude Code or Codex), so plugins stay decoupled at the behavior layer.
 
 ## PR Monitoring Window
 
-- Codex's synchronous Stop monitor checks immediately and yields after five
-  seconds. CLI Tab inputs stay in the TUI's memory until Stop finishes, so a
-  hook cannot directly detect that queue. Later PR feedback is checked at the
-  next Stop. Enter submissions are detected through prompt history or status;
+- Codex's synchronous Stop monitor and Claude's background `asyncRewake`
+  monitor check immediately, then after 10/30/60/120 seconds, with a 30-poll
+  limit. Codex no longer yields after five seconds; later feedback can trigger
+  a continuation within the same Stop invocation.
+- Enter submissions are detected through prompt history or session status;
   persistent Codex queues are checked separately, scoped to the session.
-- Claude's background `asyncRewake` monitor keeps the existing polling schedule
-  and 30-poll limit.
-- `CODEMATE_MONITOR_MAX_SECONDS` overrides the monitor window for either
-  runtime; `0` disables that time limit. Codex's Stop handler has a separate
-  30-second timeout to bound slow commands across the dispatcher.
+  CLI Tab inputs stay in the TUI's memory and do not interrupt monitoring.
+- `CODEMATE_MONITOR_MAX_SECONDS` sets an optional monitor time limit for either
+  runtime; the default `0` disables that time limit. Codex's Stop handler has
+  a separate seven-day timeout, matching Claude's monitor handler, so the
+  dispatcher does not cut off the normal polling window.
 
 ## Plugin Dependency Direction
 

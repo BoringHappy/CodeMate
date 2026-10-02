@@ -507,7 +507,9 @@ CODEMATE_CUSTOM_PLUGINS=example-skill@my-plugins
 
 ## PR Comment 监控
 
-CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第一次检查立即运行，后续检查按 10、30、60、120 秒退避，最大间隔保持 120 秒；不再依赖 cron，也不再通过 tmux 注入 prompt。Claude 使用 `asyncRewake` 在后台 polling，保持 UI 可交互；Codex 目前不运行 async command hook，因此使用同步 Stop continuation contract。
+CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第一次检查立即运行，后续检查按 10、30、60、120 秒退避，最大间隔保持 120 秒，每次最多检查 30 轮；不再依赖 cron，也不再通过 tmux 注入 prompt。Claude 使用 `asyncRewake` 在后台 polling，保持 UI 可交互；Codex 使用同步 Stop continuation contract，在收到反馈后原生创建下一轮处理。
+
+Codex 会持续执行这一轮询周期，不再等待 5 秒就退出。可通过 `CODEMATE_MONITOR_MAX_SECONDS` 设置额外时间限制，默认 `0` 表示不限制。已提交的 prompt 和 Codex 持久化队列中的消息会结束监控；暂存在 TUI 内存中的 Tab 消息不会中断监控。
 
 每次调用 `gh` 之前，hook 都会确认当前 session 仍为 Stop 状态，并确认当前 worktree/branch 仍有关联的 open PR。如果用户提交了新 prompt，正在运行的 monitor 会退出。检测到反馈时，Claude 通过 `asyncRewake` 被唤醒，Codex 则收到结构化 Stop continuation；两者都会原生创建下一轮处理。
 

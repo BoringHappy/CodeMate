@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import sqlite3
 import subprocess
@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = ROOT / "plugins" / "workspace" / "hooks"
@@ -169,7 +168,7 @@ def test_agent_hook_configs_use_supported_stop_delivery() -> None:
 
     assert len(codex_stop) == 1
     assert codex_stop[0]["command"].endswith("/hooks/stop.sh")
-    assert codex_stop[0]["timeout"] == 30
+    assert codex_stop[0]["timeout"] == 604800
     assert "asyncRewake" not in codex_stop[0]
     assert len(claude_stop) == 2
     assert claude_stop[1]["command"].endswith("/hooks/claude_stop.sh")
@@ -313,6 +312,7 @@ def test_queued_prompts_are_scoped_by_agent_and_session(
         env=env,
         text=True,
         capture_output=True,
+        check=False,
     )
 
     assert result.returncode == (0 if expected_stopped else 1)
@@ -829,7 +829,9 @@ def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("max_seconds", [None, "2"])
-def test_codex_monitor_yields_without_a_visible_pending_prompt(tmp_path: Path, max_seconds: str | None) -> None:
+def test_codex_monitor_waits_for_feedback_unless_time_limit_is_configured(
+    tmp_path: Path, max_seconds: str | None,
+) -> None:
     repo = tmp_path / "repo"
     runtime = tmp_path / "runtime"
     fake_bin = tmp_path / "bin"
@@ -839,13 +841,22 @@ def test_codex_monitor_yields_without_a_visible_pending_prompt(tmp_path: Path, m
     fake_bin.mkdir()
     codex_home.mkdir()
     init_repo(repo)
-    write_gh(fake_bin, 48, draft=True)
+    comment = {"id": 1, "user": {"login": "reviewer"}, "body": "feedback after the first poll"}
+    write_gh(
+        fake_bin, 48, draft=True,
+        api_issues=(
+            'if [ -f "$CODEMATE_TEST_POLL_MARKER" ]; then\n'
+            f"  printf '%s\\n' '{json.dumps(comment)}'\n"
+            'else\n  touch "$CODEMATE_TEST_POLL_MARKER"\nfi\n'
+        ),
+    )
     env = os.environ.copy() | {
         "CODEMATE_AGENT": "codex",
         "CODEMATE_RUNTIME_DIR": str(runtime),
         "CODEX_HOME": str(codex_home),
         "CODEX_SQLITE_HOME": str(codex_home),
         "CODEMATE_TEST_GH_LOG": str(call_log),
+        "CODEMATE_TEST_POLL_MARKER": str(tmp_path / "first-poll"),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
     env.pop("CODEMATE_NO_PR", None)
@@ -853,20 +864,30 @@ def test_codex_monitor_yields_without_a_visible_pending_prompt(tmp_path: Path, m
     env.pop("CODEMATE_MONITOR_DELAYS", None)
     if max_seconds is not None:
         env["CODEMATE_MONITOR_MAX_SECONDS"] = max_seconds
-    stop = hook_input("cli-local-queue-session", repo, "Stop")
+    stop = hook_input("continued-monitor-session", repo, "Stop")
     run_hook("record_session_status.sh", stop, cwd=repo, env=env)
 
-    # A CLI Tab queue is private to the TUI: status stays Stop, and no queue or
-    # history entry becomes visible to this synchronous hook.
+    # Feedback arrives on the second poll, after the default ten-second backoff.
+    # Without an explicit limit the same Stop must wait and return a continuation.
+    started = time.monotonic()
     result = subprocess.run(
         [str(HOOKS / "monitor_pr.sh")], cwd=repo, env=env,
-        input=json.dumps(stop), text=True, capture_output=True, check=True, timeout=8,
+        input=json.dumps(stop), text=True, capture_output=True, check=True, timeout=20,
     )
 
-    assert result.stdout == result.stderr == ""
-    assert len(call_log.read_text().splitlines()) == 4
+    assert result.stderr == ""
     monitor_log = next(runtime.glob("sessions/*/workspaces/*/pr-monitor.log"))
-    assert f"Monitor time limit reached ({max_seconds or '5'}s)" in monitor_log.read_text()
+    if max_seconds is None:
+        assert time.monotonic() - started >= 10
+        output = json.loads(result.stdout)
+        assert output["decision"] == "block"
+        assert comment["body"] in output["reason"]
+        assert sum(line.startswith("pr view ") for line in call_log.read_text().splitlines()) == 2
+        assert "Monitor time limit reached" not in monitor_log.read_text()
+    else:
+        assert result.stdout == ""
+        assert len(call_log.read_text().splitlines()) == 4
+        assert f"Monitor time limit reached ({max_seconds}s)" in monitor_log.read_text()
     status = next(runtime.glob("sessions/*/status.json"))
     assert json.loads(status.read_text())["event"] == "Stop"
     assert not list(codex_home.iterdir())
