@@ -82,6 +82,7 @@ The marketplace is fetched from the external repository: `BoringHappy/CodeMatePl
 - Branch PR state: resolved live from GitHub via the `pr` plugin's `pr-status` interface (query-first); monitor cursors and locks live under the runtime root, keyed by worktree + branch
 - Slack notification on Stop: sends a message to `SLACK_WEBHOOK` when new commits are pushed (requires `SLACK_WEBHOOK` env var)
 - `/workspace:best-practice` - Bootstrap a repo with spec issue templates, labels, and PR template
+- `/workspace:setup-services` - Create or update `.codemate/config.yaml` using the target repository's setup commands, development services, and readiness checks
 
 **Configuring Default Plugins:**
 

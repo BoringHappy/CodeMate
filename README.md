@@ -344,6 +344,11 @@ Commit `.codemate/config.yaml` in your repository to install dependencies and
 start development services when a standard CodeMate container starts. This also
 works with `--shell` and `--chat`; `--pure` does not run project setup.
 
+Use the `workspace:setup-services` skill in Codex or
+`/workspace:setup-services` in Claude Code to create or update this file for
+your repository. The skill inspects existing development commands and lockfiles,
+then configures dependency setup, services, and readiness checks.
+
 ```yaml
 setup:
   - cwd: backend
@@ -485,6 +490,7 @@ The `--granularity` flag controls task sizing:
 | Command | Description |
 |---------|-------------|
 | `/workspace:best-practice` | Bootstrap a repo with spec issue templates, labels, and PR template |
+| `/workspace:setup-services` | Create or update `.codemate/config.yaml` for automatic dependency setup and project service startup |
 
 The workspace plugin also installs session lifecycle hooks:
 - **SessionStart** — records session start time and current commit in session-scoped runtime state

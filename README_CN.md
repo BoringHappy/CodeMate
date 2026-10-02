@@ -370,6 +370,8 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 
 在仓库中提交 `.codemate/config.yaml`，标准 CodeMate 容器启动时就会自动安装依赖并启动开发服务。`--shell` 和 `--chat` 同样适用；`--pure` 不执行项目初始化。
 
+在自己的仓库中，让 Codex 使用 `workspace:setup-services` skill，或在 Claude Code 中调用 `/workspace:setup-services`，即可创建或更新配置。skill 会检查已有开发命令和锁文件，按项目实际情况配置依赖安装、服务启动和就绪检查。
+
 ```yaml
 setup:
   - cwd: backend
