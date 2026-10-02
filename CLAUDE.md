@@ -36,12 +36,13 @@ Parameters:
 
 ### Container Startup Flow
 
-1. The combined image uses `setup/setup.sh` for shared Git, GitHub, repository, pre-commit, and soft-link initialization.
+1. The combined image uses Tini and `setup/setup.sh` for shared Git, GitHub, repository, pre-commit, and soft-link initialization.
 2. `setup/shell/setup-git.sh` configures git user from environment variables
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
-6. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. PR monitoring runs from the workspace plugin's native Stop hook.
+6. `setup/python/project-services.py` reads optional `.codemate/config.yaml`, runs sequential setup, and starts Supervisor services with HTTP readiness checks. It keeps the agent/shell on the original TTY and cleans service process groups on exit. `codemate-services` exposes status, logs, start, stop, and restart inside the container.
+7. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. Workspace SessionStart hooks inject live project service status into both agents; PR monitoring runs from the native Stop hook.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.
 
@@ -126,7 +127,7 @@ Custom marketplaces and plugins are added/installed after the default ones durin
 
 ## Development Notes
 
-- No test suite exists - this is infrastructure/tooling
+- Run tests with `uv run --with pytest --with pyyaml --with supervisor pytest -q`; service integration tests use real Supervisor processes and a PTY without Docker.
 - GitHub Actions workflow (`docker-build.yml`) builds and pushes the combined image to GHCR on main branch and tags
 - GitHub Actions workflow (`docker-build-pure.yml`) builds and pushes the pure image (`codemate-pure`) on main branch, and smoke tests it on pull requests
 - GitHub Actions workflow (`docker-build-schedule.yml`) triggers a rebuild every day at 05:00 UTC

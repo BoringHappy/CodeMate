@@ -366,6 +366,56 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 `CODEMATE_BRANCH_NAME`、`CODEMATE_PR_NUMBER`、`CODEMATE_PR_TITLE`、`CODEMATE_ISSUE_NUMBER`、`CODEMATE_QUERY`、`CODEMATE_NO_PR`、`CODEMATE_CHAT`、`CODEMATE_SKIP_PULL` 和 `CODEMATE_CO_AUTHOR_BY` 可以通过 CLI 参数、`.env` 或全局环境变量设置。单次运行优先使用 CLI 参数。使用 `codemate --agent claude|codex` 可为单次运行覆盖 `.env` 中的 `CODEMATE_AGENT`；使用 `codemate --chat` 可跳过 PR 创建和 CodeMate system prompt 注入；使用 `codemate --shell` 可执行同样的容器初始化流程，但不启动 agent，而是直接进入交互式 zsh；使用 `codemate --pure` 可完全跳过初始化，直接运行挂载了独立 home（`CODEMATE_PURE_HOME`）的纯 zsh 容器；使用 `codemate --skip-pull` 可跳过启动时的镜像拉取、直接使用本地缓存的镜像；使用 `codemate --co-author-by "Name <email@example.com>"` 可为 Git commit skill 创建的提交添加 co-author。
 
 
+## 自动启动项目服务
+
+在仓库中提交 `.codemate/config.yaml`，标准 CodeMate 容器启动时就会自动安装依赖并启动开发服务。`--shell` 和 `--chat` 同样适用；`--pure` 不执行项目初始化。
+
+```yaml
+setup:
+  - cwd: backend
+    run: uv sync
+  - cwd: frontend
+    run: npm ci
+
+services:
+  api:
+    cwd: backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ready:
+      http: http://127.0.0.1:8000/health
+  web:
+    cwd: frontend
+    command: npm run dev -- --host 0.0.0.0 --port 3000 --strictPort
+    ready:
+      http: http://127.0.0.1:3000/
+```
+
+- `version: 1` 可省略，`setup` 和 `services` 均可省略。没有配置文件时沿用原有启动行为。
+- `cwd` 默认为仓库根目录，必须位于仓库内。命令通过 Bash 执行，继承容器环境变量，包括现有 `.env` / `--env` 配置。服务命令应保持前台运行，不要使用 `&` 或 daemon 模式。
+- 每次容器启动按顺序执行 setup，每步默认超时 300 秒，可在该步骤设置 `timeout: 600`。脚本应保持幂等。某一步失败会跳过剩余 setup 和服务启动。
+- Supervisor 同时启动所有服务。可选的 `ready.http` 等待 HTTP 2xx 响应，默认超时 30 秒，可设置 `ready.timeout: 60`。不配置探测时，进程持续运行一秒即视为已启动。HTTP 探测不使用环境中的代理设置。
+- 配置、setup 或就绪检查失败会显示原因，仍允许进入 agent/shell 排查。就绪检查超时不会停止服务。Supervisor 会重试启动失败的服务，并在服务异常退出后自动重启。
+- 重新 attach 不重复执行 setup 或启动服务；detach 后服务继续运行。退出会话或停止容器时清理 Supervisor 及服务进程组。在 agent 中按 Ctrl+C 不会停止开发服务。
+
+在容器内仓库任意子目录中，可以执行：
+
+```bash
+codemate-services status
+codemate-services status --json   # 当前进程状态和 HTTP 就绪状态
+codemate-services logs web --follow
+codemate-services restart api
+codemate-services stop web
+codemate-services start web
+```
+
+运行状态和轮转日志放在 `/tmp/codemate-services-<uid>-<workspace-hash>`，不会写入仓库或共享的 CodeMate home。setup 输出写入 `setup.log`，配置或启动错误写入 `startup.log`；`status --json` 会返回日志位置。容器重建后这些日志会被删除。配置修改在下次容器启动时生效，`start` 和 `restart` 复用已加载的服务定义。
+
+workspace 插件在 `SessionStart` 检查当前服务状态，并将 setup 结果、进程状态、HTTP 就绪状态和日志位置加入 Claude/Codex 上下文。恢复会话时重新检查；hook 本身不安装依赖或启动服务。
+
+此功能不自动发布 Docker 端口，也不提供预览代理。使用 bridge 网络时，在创建容器时按需映射，例如 `--network bridge --docker-param "-p 127.0.0.1:3000:3000"`。
+
+本地运行测试：`uv run --with pytest --with pyyaml --with supervisor pytest -q`。服务集成测试使用真实 Supervisor、HTTP 服务和伪终端，不需要 Docker daemon。
+
 ## 工作原理
 
 CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/BoringHappy/CodeMate/pkgs/container/codemate-base)，每周重建以保持系统包和开发工具的最新状态。
@@ -374,11 +424,12 @@ CodeMate 使用单独的[基础镜像（`codemate-base`）](https://github.com/B
 1. clone/更新 repository 到 `/home/agent/<repo-name>`
 2. checkout 指定的 branch 或 PR
 3. 如果在新 branch 上工作，则创建 PR（除非使用 `--no-pr`、`--chat` 或 fork 工作流）
-4. 直接启动 Claude Code 或 Codex，把初始 query 作为原生 initial prompt 传入；除非启用 chat 模式，否则会附加 CodeMate 指令
-5. 如果提供了 `--query`，则向所选 agent 发送初始 query
-6. 在 agent 空闲时，通过 workspace 插件的 Stop hook 监控 PR 评论、CI 失败和 review-ready 状态
+4. 检测 `.codemate/config.yaml`，执行 setup 并启动配置的项目服务
+5. 直接启动 Claude Code 或 Codex，把初始 query 作为原生 initial prompt 传入；除非启用 chat 模式，否则会附加 CodeMate 指令
+6. 如果提供了 `--query`，则向所选 agent 发送初始 query
+7. 在 agent 空闲时，通过 workspace 插件的 Stop hook 监控 PR 评论、CI 失败和 review-ready 状态
 
-使用 `--shell` 时，容器完成上述仓库初始化后直接打开交互式 zsh，不安装 agent 插件，也不启动 Claude Code 或 Codex。
+使用 `--shell` 时，容器完成上述仓库初始化和项目服务启动后直接打开交互式 zsh，不安装 agent 插件，也不启动 Claude Code 或 Codex。
 
 使用 `--pure` 时，上述步骤全部不执行。pure 镜像直接启动 zsh，只挂载它自己的 home（`CODEMATE_PURE_HOME`，默认 `~/.codemate-pure`）和当前目录，因此不需要 GitHub token、git 身份、仓库 URL，也不要求宿主机安装 `git` 或 `gh`。详见 [Pure 模式](#pure-模式)。
 

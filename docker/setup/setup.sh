@@ -15,4 +15,4 @@ run_setup_script "$SETUP_DIR/shell/setup-softlinks.sh" "Running setup-softlinks.
 printf "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 printf "${GREEN}✓ All setup scripts completed successfully${RESET}\n"
 printf "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-exec "$@"
+exec /usr/bin/python3 "$SETUP_DIR/python/project-services.py" run -- "$@"

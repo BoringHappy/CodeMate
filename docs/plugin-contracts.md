@@ -97,3 +97,27 @@ agent (Claude Code or Codex), so plugins stay decoupled at the behavior layer.
 - `pr` — owns PR semantics; depends on `git` (via `pr:fix-comments`).
 - `workspace` — owns session lifecycle and PR-feedback monitoring; consumes the
   `pr` plugin's contract. The `pr` plugin never depends on `workspace`.
+
+## Project Service Status
+
+- The standard container reads `<repo>/.codemate/config.yaml` after repository
+  setup, runs setup commands, and owns Supervisor and service lifetimes.
+- Both workspace `SessionStart` hooks call `codemate-services status --json`
+  from the event's Git worktree root. This is a read-only check, including on
+  resume or compaction; it never reruns setup or starts services.
+- The manager returns `configured`, `setup` (`pending`, `running`, `complete`,
+  `failed`, or `unknown`), `startup_error`, `logs_dir`, and `services`. Each
+  service has `name`, live Supervisor `process` state (or `UNAVAILABLE`),
+  current HTTP `readiness` (`ready`, `not_ready`, `not_running`, or
+  `not_configured`), and `log` path. HTTP probes have a one-second timeout;
+  the hook bounds the entire query to eight seconds.
+- Hooks inject `hookSpecificOutput.additionalContext` with
+  `hookEventName: SessionStart`, supported by both
+  [Codex](https://learn.chatgpt.com/docs/hooks#sessionstart) and
+  [Claude Code](https://code.claude.com/docs/en/hooks#sessionstart).
+  Context includes status and log locations, not log contents or environment
+  variables. Missing configuration is silent; a missing manager or failed
+  query produces an informational context message without blocking startup.
+- Service state belongs to the container, not an agent session: it is stored
+  under `/tmp/codemate-services-<uid>-<workspace-hash>`, outside the repository
+  and shared home. Plugins query the manager rather than reading those files.

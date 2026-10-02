@@ -338,6 +338,84 @@ Docker receives generated environment values from that resolved configuration; t
 `CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, `CODEMATE_CHAT`, `CODEMATE_SKIP_PULL`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, `codemate --chat` to skip PR creation and CodeMate system prompt injection, `codemate --shell` to run the same container setup and then drop into an interactive zsh shell instead of starting the agent, `codemate --pure` to skip setup entirely and run a plain zsh container with its own home (`CODEMATE_PURE_HOME`) mounted, `codemate --skip-pull` to use a locally cached Docker image without forcing a pull on startup, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
 
 
+## Automatic Project Services
+
+Commit `.codemate/config.yaml` in your repository to install dependencies and
+start development services when a standard CodeMate container starts. This also
+works with `--shell` and `--chat`; `--pure` does not run project setup.
+
+```yaml
+setup:
+  - cwd: backend
+    run: uv sync
+  - cwd: frontend
+    run: npm ci
+
+services:
+  api:
+    cwd: backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ready:
+      http: http://127.0.0.1:8000/health
+  web:
+    cwd: frontend
+    command: npm run dev -- --host 0.0.0.0 --port 3000 --strictPort
+    ready:
+      http: http://127.0.0.1:3000/
+```
+
+- `version: 1` is optional. `setup` and `services` are both optional; without
+  the file, startup follows the existing behavior.
+- `cwd` defaults to the repository root and must stay inside it. Commands run
+  in Bash and inherit the container environment, including existing `.env` /
+  `--env` values. Keep service commands in the foreground (no `&` or daemon mode).
+- Setup runs sequentially on each container start, with a default timeout of
+  300 seconds per step; override with `timeout: 600` on a step. Setup commands
+  should be idempotent. A failed step skips remaining setup and service startup.
+- Services start together under Supervisor. `ready.http` is optional and waits
+  for HTTP 2xx, with a default timeout of 30 seconds; override with
+  `ready.timeout: 60`. Without a probe, a process must stay alive for one second.
+  Probes bypass HTTP proxy environment variables.
+- Configuration/setup errors or failed readiness checks are reported, then the
+  agent/shell still opens for repairs. A readiness timeout leaves the process
+  running. Supervisor retries startup failures and restarts unexpected exits.
+- Re-attaching does not rerun setup or duplicate services. Detaching leaves
+  services running; exiting the session or stopping the container cleans up
+  Supervisor and service process groups. Ctrl+C in the agent does not stop
+  development services.
+
+Inside the container, from anywhere in the repository:
+
+```bash
+codemate-services status
+codemate-services status --json   # Live process and HTTP readiness status
+codemate-services logs web --follow
+codemate-services restart api
+codemate-services stop web
+codemate-services start web
+```
+
+Runtime state and rotating logs live under
+`/tmp/codemate-services-<uid>-<workspace-hash>`, not in the repository or shared
+CodeMate home. Setup output goes to `setup.log`; configuration/startup errors
+go to `startup.log`. `status --json` includes the log locations. Recreating the
+container removes these logs. Configuration changes take effect on the next
+container start; `start` and `restart` reuse the loaded service definitions.
+
+The workspace plugin checks current service status on `SessionStart` and adds
+the summary to both Claude and Codex context, including setup failures, process
+state, HTTP readiness, and log locations. Resuming a session checks again;
+hooks never start services or rerun setup.
+
+This feature does not publish Docker ports or provide a preview proxy. For
+bridge networking, publish the ports you need when creating the container,
+for example `--network bridge --docker-param "-p 127.0.0.1:3000:3000"`.
+
+Run the test suite locally with
+`uv run --with pytest --with pyyaml --with supervisor pytest -q`.
+The service integration tests run real Supervisor, HTTP services, and a PTY
+without requiring a Docker daemon.
+
 ## How It Works
 
 CodeMate uses a separate [base image (`codemate-base`)](https://github.com/BoringHappy/CodeMate/pkgs/container/codemate-base) that is rebuilt weekly to keep system packages and development tools up-to-date.
@@ -348,12 +426,13 @@ On startup, the container:
 3. Clones/updates repository to `/home/agent/<repo-name>`
 4. Checks out the specified branch or PR
 5. Creates a draft PR if working on a new branch (unless `--no-pr`, `--chat`, or fork workflow)
-6. Installs/updates plugins for the selected agent from configured marketplaces
-7. Starts Claude Code or Codex directly with the initial query as a native initial prompt, appending CodeMate instructions unless chat mode is enabled
-8. Sends the initial query to the selected agent if `--query` is provided
-9. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
+6. Runs `.codemate/config.yaml` setup and starts project services, if configured
+7. Installs/updates plugins for the selected agent from configured marketplaces
+8. Starts Claude Code or Codex directly with the initial query as a native initial prompt, appending CodeMate instructions unless chat mode is enabled
+9. Sends the initial query to the selected agent if `--query` is provided
+10. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
 
-With `--shell`, the container runs steps 1-5 and then opens an interactive zsh shell instead of installing agent plugins and starting Claude Code or Codex.
+With `--shell`, the container runs steps 1-6 and then opens an interactive zsh shell instead of installing agent plugins and starting Claude Code or Codex.
 
 With `--pure`, none of those steps run. The pure image starts zsh directly with its own home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`) and the current directory mounted, so it needs no GitHub token, git identity, repository URL, or host `git`/`gh` installation. See [Pure Mode](#pure-mode) for details.
 
