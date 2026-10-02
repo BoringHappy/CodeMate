@@ -8,6 +8,12 @@
             "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/record_session_status.sh",
             "timeout": 10,
             "statusMessage": "Initializing CodeMate session state"
+          },
+          {
+            "type": "command",
+            "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/service_status.sh",
+            "timeout": 10,
+            "statusMessage": "Checking project services"
           }
         ]
       }
@@ -29,7 +35,7 @@
           {
             "type": "command",
             "command": "${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/hooks/stop.sh",
-            "timeout": 30,
+            "timeout": 604800,
             "statusMessage": "Monitoring pull request feedback"
           }
         ]

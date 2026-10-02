@@ -80,16 +80,17 @@ agent (Claude Code or Codex), so plugins stay decoupled at the behavior layer.
 
 ## PR Monitoring Window
 
-- Codex's synchronous Stop monitor checks immediately and yields after five
-  seconds. CLI Tab inputs stay in the TUI's memory until Stop finishes, so a
-  hook cannot directly detect that queue. Later PR feedback is checked at the
-  next Stop. Enter submissions are detected through prompt history or status;
+- Codex's synchronous Stop monitor and Claude's background `asyncRewake`
+  monitor check immediately, then after 10/30/60/120 seconds, with a 30-poll
+  limit. Codex no longer yields after five seconds; later feedback can trigger
+  a continuation within the same Stop invocation.
+- Enter submissions are detected through prompt history or session status;
   persistent Codex queues are checked separately, scoped to the session.
-- Claude's background `asyncRewake` monitor keeps the existing polling schedule
-  and 30-poll limit.
-- `CODEMATE_MONITOR_MAX_SECONDS` overrides the monitor window for either
-  runtime; `0` disables that time limit. Codex's Stop handler has a separate
-  30-second timeout to bound slow commands across the dispatcher.
+  CLI Tab inputs stay in the TUI's memory and do not interrupt monitoring.
+- `CODEMATE_MONITOR_MAX_SECONDS` sets an optional monitor time limit for either
+  runtime; the default `0` disables that time limit. Codex's Stop handler has
+  a separate seven-day timeout, matching Claude's monitor handler, so the
+  dispatcher does not cut off the normal polling window.
 
 ## Plugin Dependency Direction
 
@@ -97,3 +98,33 @@ agent (Claude Code or Codex), so plugins stay decoupled at the behavior layer.
 - `pr` — owns PR semantics; depends on `git` (via `pr:fix-comments`).
 - `workspace` — owns session lifecycle and PR-feedback monitoring; consumes the
   `pr` plugin's contract. The `pr` plugin never depends on `workspace`.
+
+## Project Service Status
+
+- After repository setup, the standard container calls `codemate-services up`
+  to read `<repo>/.codemate/config.yaml`, run setup commands, and start background
+  Supervisor services. The command returns after readiness checks; it never
+  launches an agent. `setup.sh` separately prints the session banner and execs
+  the foreground command, continuing even when service startup returns failure.
+- Services belong to the container and remain independent of agent sessions.
+  Repeated `up` calls reuse a running Supervisor without rerunning setup;
+  `start` and `restart` use loaded definitions rather than reloading the YAML.
+- Both workspace `SessionStart` hooks call `codemate-services status --json`
+  from the event's Git worktree root. This is a read-only check, including on
+  resume or compaction; it never reruns setup or starts services.
+- The manager returns `configured`, `setup` (`pending`, `running`, `complete`,
+  `failed`, or `unknown`), `startup_error`, `logs_dir`, and `services`. Each
+  service has `name`, live Supervisor `process` state (or `UNAVAILABLE`),
+  current HTTP `readiness` (`ready`, `not_ready`, `not_running`, or
+  `not_configured`), and `log` path. HTTP probes have a one-second timeout;
+  the hook bounds the entire query to eight seconds.
+- Hooks inject `hookSpecificOutput.additionalContext` with
+  `hookEventName: SessionStart`, supported by both
+  [Codex](https://learn.chatgpt.com/docs/hooks#sessionstart) and
+  [Claude Code](https://code.claude.com/docs/en/hooks#sessionstart).
+  Context includes status and log locations, not log contents or environment
+  variables. Missing configuration is silent; a missing manager or failed
+  query produces an informational context message without blocking startup.
+- Service state belongs to the container, not an agent session: it is stored
+  under `/tmp/codemate-services-<uid>-<workspace-hash>`, outside the repository
+  and shared home. Plugins query the manager rather than reading those files.

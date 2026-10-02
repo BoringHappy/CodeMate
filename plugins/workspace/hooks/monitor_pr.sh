@@ -373,11 +373,8 @@ main() {
     PROMPT_BASELINE_COUNT=$(codemate_prompt_history_count "$SESSION_ID")
     NEW_PROMPT_LOGGED=false
 
-    # CLI Tab inputs stay in the TUI's memory until this turn finishes, so
-    # neither UserPromptSubmit, history nor the persistent queue can expose
-    # them here. Bound Codex's synchronous monitor so Stop releases the turn.
-    # Claude's asyncRewake monitor can keep polling in the background.
-    codemate_is_codex && MAX_MONITOR_SECONDS=5
+    # Keep monitoring until feedback, a visible user prompt, or the poll limit.
+    # CLI Tab inputs remain private to the TUI and do not shorten this window.
     if [[ "${CODEMATE_MONITOR_MAX_SECONDS:-}" =~ ^[0-9]+$ ]]; then
         MAX_MONITOR_SECONDS=$((10#$CODEMATE_MONITOR_MAX_SECONDS))
     fi

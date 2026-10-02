@@ -1,7 +1,7 @@
 {
   "name": "workspace",
-  "version": "1.1.0",
-  "description": "CodeMate workspace utilities for repository setup and best-practice configuration",
+  "version": "1.2.0",
+  "description": "CodeMate workspace utilities for project service startup, repository setup, and best-practice configuration",
   "author": {
     "name": "CodeMate"
   },
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "Workspace",
     "shortDescription": "Configure repository workflow best practices.",
-    "longDescription": "CodeMate Workspace provides reusable repository setup and best-practice workflows for development teams.",
+    "longDescription": "CodeMate Workspace configures automatic project service startup and provides reusable repository setup and best-practice workflows for development teams.",
     "developerName": "CodeMate",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],

@@ -6,8 +6,14 @@ FROM ${BASE_IMAGE}
 # Switch to root for setup operations
 USER root
 
+# Project services are part of the standard image, including --shell sessions.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-yaml supervisor tini \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy setup scripts as root (755 allows agent user to read/execute)
 COPY --chmod=755 setup /usr/local/bin/setup
+RUN ln -s /usr/local/bin/setup/python/project-services.py /usr/local/bin/codemate-services
 
 # Environment variables for plugin configuration
 ENV CODEMATE_DEFAULT_MARKETPLACES="BoringHappy/CodeMate"
@@ -25,5 +31,5 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && npm install -g @cometix/ccline @openai/codex@latest \
     && codex --version
 
-ENTRYPOINT ["/usr/local/bin/setup/setup.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/setup/setup.sh"]
 CMD ["/usr/local/bin/setup/run.sh"]

@@ -338,6 +338,98 @@ Docker receives generated environment values from that resolved configuration; t
 `CODEMATE_BRANCH_NAME`, `CODEMATE_PR_NUMBER`, `CODEMATE_PR_TITLE`, `CODEMATE_ISSUE_NUMBER`, `CODEMATE_QUERY`, `CODEMATE_NO_PR`, `CODEMATE_CHAT`, `CODEMATE_SKIP_PULL`, and `CODEMATE_CO_AUTHOR_BY` can be set through CLI options, `.env`, or ambient environment variables. Prefer CLI options for one-off runs. Use `codemate --agent claude|codex` to override `CODEMATE_AGENT` from `.env` for a single run, `codemate --chat` to skip PR creation and CodeMate system prompt injection, `codemate --shell` to run the same container setup and then drop into an interactive zsh shell instead of starting the agent, `codemate --pure` to skip setup entirely and run a plain zsh container with its own home (`CODEMATE_PURE_HOME`) mounted, `codemate --skip-pull` to use a locally cached Docker image without forcing a pull on startup, and `codemate --co-author-by "Name <email@example.com>"` to add a co-author for commits made by the Git commit skill.
 
 
+## Automatic Project Services
+
+Commit `.codemate/config.yaml` in your repository to install dependencies and
+start development services when a standard CodeMate container starts. This also
+works with `--shell` and `--chat`; `--pure` does not run project setup.
+
+Use the `workspace:setup-services` skill in Codex or
+`/workspace:setup-services` in Claude Code to create or update this file for
+your repository. The skill inspects existing development commands and lockfiles,
+then configures dependency setup, services, and readiness checks.
+
+```yaml
+setup:
+  - cwd: backend
+    run: uv sync
+  - cwd: frontend
+    run: npm ci
+
+services:
+  api:
+    cwd: backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ready:
+      http: http://127.0.0.1:8000/health
+  web:
+    cwd: frontend
+    command: npm run dev -- --host 0.0.0.0 --port 3000 --strictPort
+    ready:
+      http: http://127.0.0.1:3000/
+```
+
+- `version: 1` is optional. `setup` and `services` are both optional; without
+  the file, startup follows the existing behavior.
+- `cwd` defaults to the repository root and must stay inside it. Commands run
+  in Bash and inherit the container environment, including existing `.env` /
+  `--env` values. Keep service commands in the foreground (no `&` or daemon mode).
+- Setup runs sequentially on each container start, with a default timeout of
+  300 seconds per step; override with `timeout: 600` on a step. Setup commands
+  should be idempotent. A failed step skips remaining setup and service startup.
+- Services start together under Supervisor. `ready.http` is optional and waits
+  for HTTP 2xx, with a default timeout of 30 seconds; override with
+  `ready.timeout: 60`. Without a probe, a process must stay alive for one second.
+  Probes bypass HTTP proxy environment variables.
+- Configuration/setup errors or failed readiness checks are reported, then the
+  agent/shell still opens for repairs. A readiness timeout leaves the process
+  running. Supervisor retries startup failures and restarts unexpected exits.
+- `codemate-services up` runs setup, starts Supervisor in the background, waits
+  for readiness, and returns. The container entrypoint then prints the session
+  banner and directly executes Claude, Codex, or the shell. The service manager
+  does not launch or wait for an agent.
+- Re-attaching does not rerun setup or duplicate services. Supervisor and its
+  services remain independent of agent sessions while the container is running;
+  Ctrl+C in the agent does not stop them. Stopping the container ends its
+  background processes as well.
+
+Inside the container, from anywhere in the repository:
+
+```bash
+codemate-services up             # Initialize background services; no agent is started
+codemate-services status
+codemate-services status --json   # Live process and HTTP readiness status
+codemate-services logs web --follow
+codemate-services restart api
+codemate-services stop web
+codemate-services start web
+```
+
+Runtime state and rotating logs live under
+`/tmp/codemate-services-<uid>-<workspace-hash>`, not in the repository or shared
+CodeMate home. Setup output goes to `setup.log`; configuration/startup errors
+go to `startup.log`. `status --json` includes the log locations. Recreating the
+container removes these logs. Configuration changes take effect on the next
+container start. If no Supervisor is running yet, `up` can initialize services
+in an existing container; otherwise it reuses the running Supervisor without
+rerunning setup. `start` and `restart` reuse the loaded service definitions.
+`up` returns a nonzero exit code on setup or readiness failure; the container
+entrypoint reports it and still opens the session for repairs.
+
+The workspace plugin checks current service status on `SessionStart` and adds
+the summary to both Claude and Codex context, including setup failures, process
+state, HTTP readiness, and log locations. Resuming a session checks again;
+hooks never start services or rerun setup.
+
+This feature does not publish Docker ports or provide a preview proxy. For
+bridge networking, publish the ports you need when creating the container,
+for example `--network bridge --docker-param "-p 127.0.0.1:3000:3000"`.
+
+Run the test suite locally with
+`uv run --with pytest --with pyyaml --with supervisor pytest -q`.
+The service integration tests run real Supervisor, HTTP services, and a PTY
+without requiring a Docker daemon.
+
 ## How It Works
 
 CodeMate uses a separate [base image (`codemate-base`)](https://github.com/BoringHappy/CodeMate/pkgs/container/codemate-base) that is rebuilt weekly to keep system packages and development tools up-to-date.
@@ -348,12 +440,13 @@ On startup, the container:
 3. Clones/updates repository to `/home/agent/<repo-name>`
 4. Checks out the specified branch or PR
 5. Creates a draft PR if working on a new branch (unless `--no-pr`, `--chat`, or fork workflow)
-6. Installs/updates plugins for the selected agent from configured marketplaces
-7. Starts Claude Code or Codex directly with the initial query as a native initial prompt, appending CodeMate instructions unless chat mode is enabled
-8. Sends the initial query to the selected agent if `--query` is provided
-9. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
+6. Runs `.codemate/config.yaml` setup and starts project services, if configured
+7. Installs/updates plugins for the selected agent from configured marketplaces
+8. Starts Claude Code or Codex directly with the initial query as a native initial prompt, appending CodeMate instructions unless chat mode is enabled
+9. Sends the initial query to the selected agent if `--query` is provided
+10. Uses the workspace plugin's Stop hook to monitor PR comments, CI failures, and review-ready state while the agent is idle
 
-With `--shell`, the container runs steps 1-5 and then opens an interactive zsh shell instead of installing agent plugins and starting Claude Code or Codex.
+With `--shell`, the container runs steps 1-6 and then opens an interactive zsh shell instead of installing agent plugins and starting Claude Code or Codex.
 
 With `--pure`, none of those steps run. The pure image starts zsh directly with its own home (`CODEMATE_PURE_HOME`, default `~/.codemate-pure`) and the current directory mounted, so it needs no GitHub token, git identity, repository URL, or host `git`/`gh` installation. See [Pure Mode](#pure-mode) for details.
 
@@ -406,6 +499,7 @@ The `--granularity` flag controls task sizing:
 | Command | Description |
 |---------|-------------|
 | `/workspace:best-practice` | Bootstrap a repo with spec issue templates, labels, and PR template |
+| `/workspace:setup-services` | Create or update `.codemate/config.yaml` for automatic dependency setup and project service startup |
 
 The workspace plugin also installs session lifecycle hooks:
 - **SessionStart** — records session start time and current commit in session-scoped runtime state
@@ -485,7 +579,9 @@ codemate --branch issue-456 --query "Please use /issue:read-issue skill to read 
 
 ## PR Comment Monitoring
 
-CodeMate monitors PR feedback from the workspace plugin's native `Stop` hook. The first check runs immediately; later checks back off to 10, 30, 60, and then at most 120 seconds. No cron daemon or tmux prompt injection is used. Claude runs the poller as an `asyncRewake` hook so the UI remains interactive; Codex uses its synchronous Stop continuation contract because Codex does not currently run async command hooks.
+CodeMate monitors PR feedback from the workspace plugin's native `Stop` hook. The first check runs immediately; later checks back off to 10, 30, 60, and then at most 120 seconds, up to 30 checks per invocation. No cron daemon or tmux prompt injection is used. Claude runs the poller as an `asyncRewake` hook so the UI remains interactive; Codex uses its synchronous Stop continuation contract to start a native agent turn when feedback arrives.
+
+Codex keeps monitoring through this polling window instead of yielding after five seconds. `CODEMATE_MONITOR_MAX_SECONDS` can set an optional time limit; the default `0` disables it. Submitted prompts and persistent Codex queue entries end monitoring; CLI Tab messages held in the TUI do not.
 
 The hook verifies that its own session is still stopped and that the current worktree/branch still has an open PR before every `gh` call. It also watches the agent's prompt history (`$CODEX_HOME/history.jsonl` for Codex, `$CLAUDE_CONFIG_DIR/history.jsonl` for Claude): a new user prompt is recorded there the moment it is submitted, so even while Codex is still blocked running the Stop hook, the in-flight monitor notices within a second and exits, letting the new message resume the session without pressing Esc. When feedback is found, Claude is awakened through `asyncRewake`; Codex receives a structured Stop continuation decision. Both paths create a native agent turn.
 
