@@ -12,7 +12,7 @@ run_setup_script "$SETUP_DIR/python/setup-repo.py" "Running setup-repo.py..."
 run_setup_script "$SETUP_DIR/shell/setup-precommit.sh" "Running setup-precommit.sh..."
 run_setup_script "$SETUP_DIR/shell/setup-softlinks.sh" "Running setup-softlinks.sh..."
 
-printf "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-printf "${GREEN}✓ All setup scripts completed successfully${RESET}\n"
-printf "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-exec /usr/bin/python3 "$SETUP_DIR/python/project-services.py" run -- "$@"
+# The service manager owns the service lifetime; the foreground wrapper prints
+# the session banner only after project setup and readiness checks finish.
+exec /usr/bin/python3 "$SETUP_DIR/python/project-services.py" run -- \
+    /bin/bash "$SETUP_DIR/shell/start-session.sh" "$@"

@@ -21,6 +21,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "docker/setup/python/project-services.py"
+SESSION_LAUNCHER = ROOT / "docker/setup/shell/start-session.sh"
 HOOK = ROOT / "plugins/workspace/hooks/service_status.sh"
 spec = importlib.util.spec_from_file_location("project_services", RUNNER)
 manager = importlib.util.module_from_spec(spec)
@@ -180,6 +181,51 @@ def test_setup_failure_skips_remaining_steps_and_services_but_opens_session(
     assert snapshot["setup"] == "failed"
     assert snapshot["services"][0]["process"] == "UNAVAILABLE"
     assert "failure" in (manager.runtime_path(project) / "setup.log").read_text()
+
+
+@pytest.mark.parametrize(
+    ("config", "startup_message"),
+    [
+        (None, None),
+        ({"setup": [{"run": "exit 7"}]}, "Project startup failed"),
+        ({"services": {"worker": {"command": "sleep 100"}}}, "worker: running"),
+        (
+            {
+                "services": {
+                    "worker": {
+                        "command": "sleep 100",
+                        "ready": {"http": "http://127.0.0.1:1/", "timeout": 0.2},
+                    }
+                }
+            },
+            "readiness timed out",
+        ),
+    ],
+)
+def test_session_banner_follows_project_startup_and_preserves_command(
+    project, launch, config, startup_message
+):
+    if config is not None:
+        configure(project, config)
+    argument = "a spaced argument; $literal"
+    process = launch(
+        [
+            "/bin/bash",
+            str(SESSION_LAUNCHER),
+            sys.executable,
+            "-c",
+            "import sys; print('agent received:', sys.argv[1]); raise SystemExit(23)",
+            argument,
+        ]
+    )
+    assert process.wait(timeout=12) == 23
+    output = (project / "runner-0.log").read_text()
+    banner = "Starting CodeMate session"
+    assert output.count(banner) == 1
+    if startup_message:
+        assert output.index(startup_message) < output.index(banner)
+    assert output.index(banner) < output.index(f"agent received: {argument}")
+    assert "All setup scripts completed successfully" not in output
 
 
 def test_setup_timeout_cleans_up_process_group(project, launch):
