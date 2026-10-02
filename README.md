@@ -384,14 +384,19 @@ services:
 - Configuration/setup errors or failed readiness checks are reported, then the
   agent/shell still opens for repairs. A readiness timeout leaves the process
   running. Supervisor retries startup failures and restarts unexpected exits.
-- Re-attaching does not rerun setup or duplicate services. Detaching leaves
-  services running; exiting the session or stopping the container cleans up
-  Supervisor and service process groups. Ctrl+C in the agent does not stop
-  development services.
+- `codemate-services up` runs setup, starts Supervisor in the background, waits
+  for readiness, and returns. The container entrypoint then prints the session
+  banner and directly executes Claude, Codex, or the shell. The service manager
+  does not launch or wait for an agent.
+- Re-attaching does not rerun setup or duplicate services. Supervisor and its
+  services remain independent of agent sessions while the container is running;
+  Ctrl+C in the agent does not stop them. Stopping the container ends its
+  background processes as well.
 
 Inside the container, from anywhere in the repository:
 
 ```bash
+codemate-services up             # Initialize background services; no agent is started
 codemate-services status
 codemate-services status --json   # Live process and HTTP readiness status
 codemate-services logs web --follow
@@ -405,7 +410,11 @@ Runtime state and rotating logs live under
 CodeMate home. Setup output goes to `setup.log`; configuration/startup errors
 go to `startup.log`. `status --json` includes the log locations. Recreating the
 container removes these logs. Configuration changes take effect on the next
-container start; `start` and `restart` reuse the loaded service definitions.
+container start. If no Supervisor is running yet, `up` can initialize services
+in an existing container; otherwise it reuses the running Supervisor without
+rerunning setup. `start` and `restart` reuse the loaded service definitions.
+`up` returns a nonzero exit code on setup or readiness failure; the container
+entrypoint reports it and still opens the session for repairs.
 
 The workspace plugin checks current service status on `SessionStart` and adds
 the summary to both Claude and Codex context, including setup failures, process

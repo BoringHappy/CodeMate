@@ -41,7 +41,7 @@ Parameters:
 3. `setup/shell/setup-gh.sh` authenticates GitHub CLI with token
 4. `setup/python/setup-repo.py` clones repo, checks out branch/PR, creates PR if needed
 5. `setup/shell/setup-precommit.sh` installs pre-commit git hooks when the cloned repo contains a `.pre-commit-config.yaml` (skips silently otherwise)
-6. `setup/python/project-services.py` reads optional `.codemate/config.yaml`, runs sequential setup, and starts Supervisor services with HTTP readiness checks. It keeps the agent/shell on the original TTY and cleans service process groups on exit. `codemate-services` exposes status, logs, start, stop, and restart inside the container.
+6. `setup/python/project-services.py up` reads optional `.codemate/config.yaml`, runs sequential setup, starts background Supervisor services, and returns after HTTP readiness checks. `setup.sh` then prints the session banner and directly execs the foreground command. Project services are independent of the agent and live within the container. `codemate-services` exposes up, status, logs, start, stop, and restart.
 7. `setup/run.sh` assigns an instance ID and dispatches by `CODEMATE_AGENT`. `setup/run-claude.sh` performs ccline and Claude plugin setup; `setup/run-codex.sh` installs Codex plugins through `setup/shell/setup-codex-plugins.sh`. Workspace SessionStart hooks inject live project service status into both agents; PR monitoring runs from the native Stop hook.
 
 Note: All setup scripts live under `docker/setup/` in the repository, but are copied to `/usr/local/bin/setup/` inside the container.

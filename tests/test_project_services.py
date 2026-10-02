@@ -21,7 +21,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "docker/setup/python/project-services.py"
-SESSION_LAUNCHER = ROOT / "docker/setup/shell/start-session.sh"
 HOOK = ROOT / "plugins/workspace/hooks/service_status.sh"
 spec = importlib.util.spec_from_file_location("project_services", RUNNER)
 manager = importlib.util.module_from_spec(spec)
@@ -53,7 +52,29 @@ def project(tmp_path):
     for name in ("backend", "frontend"):
         (repo / name).mkdir()
     yield repo
-    shutil.rmtree(manager.runtime_path(repo), ignore_errors=True)
+    runtime = manager.runtime_path(repo)
+    groups = [
+        item["pid"]
+        for item in manager.process_states(runtime).values()
+        if item["pid"] > 0
+    ]
+    pidfile = runtime / "supervisor.pid"
+    supervisor_pid = int(pidfile.read_text()) if pidfile.exists() else None
+    if manager.supervisor_running(runtime):
+        with manager.rpc_client(runtime) as client:
+            client.supervisor.shutdown()
+    if supervisor_pid:
+        deadline = time.monotonic() + 8
+        while running(supervisor_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if running(supervisor_pid):
+            os.kill(supervisor_pid, signal.SIGKILL)
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    shutil.rmtree(runtime, ignore_errors=True)
 
 
 def configure(repo, config):
@@ -68,18 +89,12 @@ def python_command(code):
 def launch(project):
     processes = []
 
-    def start(command=None):
-        if command is None:
-            command = [
-                sys.executable,
-                "-c",
-                "from pathlib import Path; Path('session-ready').touch(); input()",
-            ]
+    def start():
         log = (project / f"runner-{len(processes)}.log").open("w")
         process = subprocess.Popen(
-            [sys.executable, str(RUNNER), "run", "--", *command],
+            [sys.executable, str(RUNNER), "up"],
             cwd=project,
-            stdin=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -93,7 +108,6 @@ def launch(project):
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=15)
-        process.stdin.close()
 
 
 def status(repo):
@@ -122,18 +136,25 @@ def hook(repo, env, event="SessionStart"):
     return json.loads(result.stdout) if result.stdout else None
 
 
-def test_absent_config_preserves_command_arguments_and_exit_code(project, launch):
-    process = launch(
-        [
-            sys.executable,
-            "-c",
-            "import sys; print(sys.argv[1]); sys.exit(23)",
-            "hello ; $world",
-        ]
-    )
-    assert process.wait(timeout=5) == 23
-    assert (project / "runner-0.log").read_text().strip() == "hello ; $world"
+def test_absent_config_is_a_noop(project, launch):
+    process = launch()
+    assert process.wait(timeout=5) == 0
+    assert (project / "runner-0.log").read_text() == ""
     assert not manager.runtime_path(project).exists()
+
+
+def test_up_rejects_a_foreground_command(project):
+    result = subprocess.run(
+        [sys.executable, str(RUNNER), "up", "--", "touch", "should-not-exist"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "up does not accept a foreground command" in result.stderr
+    assert not (project / "should-not-exist").exists()
 
 
 @pytest.mark.parametrize(
@@ -157,9 +178,7 @@ def test_invalid_config_is_rejected_before_commands(project, bad):
         manager.load_config(project)
 
 
-def test_setup_failure_skips_remaining_steps_and_services_but_opens_session(
-    project, launch
-):
+def test_setup_failure_skips_remaining_steps_and_services(project, launch):
     configure(
         project,
         {
@@ -170,62 +189,64 @@ def test_setup_failure_skips_remaining_steps_and_services_but_opens_session(
             "services": {"web": {"command": "touch should-not-start; sleep 100"}},
         },
     )
-    process = launch(
-        [sys.executable, "-c", "print('agent started'); raise SystemExit(23)"]
-    )
-    assert process.wait(timeout=5) == 23
+    process = launch()
+    assert process.wait(timeout=5) == 1
     assert not (project / "should-not-exist").exists()
     assert not (project / "should-not-start").exists()
-    assert "agent started" in (project / "runner-0.log").read_text()
     snapshot = status(project)
     assert snapshot["setup"] == "failed"
     assert snapshot["services"][0]["process"] == "UNAVAILABLE"
     assert "failure" in (manager.runtime_path(project) / "setup.log").read_text()
 
 
-@pytest.mark.parametrize(
-    ("config", "startup_message"),
-    [
-        (None, None),
-        ({"setup": [{"run": "exit 7"}]}, "Project startup failed"),
-        ({"services": {"worker": {"command": "sleep 100"}}}, "worker: running"),
-        (
-            {
-                "services": {
-                    "worker": {
-                        "command": "sleep 100",
-                        "ready": {"http": "http://127.0.0.1:1/", "timeout": 0.2},
-                    }
-                }
-            },
-            "readiness timed out",
-        ),
-    ],
-)
-def test_session_banner_follows_project_startup_and_preserves_command(
-    project, launch, config, startup_message
+@pytest.mark.parametrize("service_exit_code", [0, 1])
+def test_entrypoint_starts_services_then_prints_banner_and_execs_session(
+    project, tmp_path, service_exit_code
 ):
-    if config is not None:
-        configure(project, config)
+    setup_dir = tmp_path / "setup"
+    (setup_dir / "shell").mkdir(parents=True)
+    (setup_dir / "python").mkdir()
+    shutil.copy(ROOT / "docker/setup/shell/common.sh", setup_dir / "shell/common.sh")
+    for name in ("git", "gh", "precommit", "softlinks"):
+        (setup_dir / f"shell/setup-{name}.sh").write_text("exit 0\n")
+    (setup_dir / "python/setup-repo.py").write_text("")
+    (setup_dir / "python/project-services.py").write_text(
+        "import sys\nassert sys.argv[1:] == ['up']\n"
+        f"print('service startup finished')\nsys.exit({service_exit_code})\n"
+    )
+    # Redirect only the container's fixed installation path into this fixture.
+    entrypoint = setup_dir / "setup.sh"
+    entrypoint.write_text(
+        (ROOT / "docker/setup/setup.sh")
+        .read_text()
+        .replace('SETUP_DIR="/usr/local/bin/setup"', f'SETUP_DIR="{setup_dir}"')
+    )
     argument = "a spaced argument; $literal"
-    process = launch(
+    result = subprocess.run(
         [
             "/bin/bash",
-            str(SESSION_LAUNCHER),
+            str(entrypoint),
             sys.executable,
             "-c",
             "import sys; print('agent received:', sys.argv[1]); raise SystemExit(23)",
             argument,
-        ]
+        ],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=5,
     )
-    assert process.wait(timeout=12) == 23
-    output = (project / "runner-0.log").read_text()
+    assert result.returncode == 23
+    output = result.stdout
     banner = "Starting CodeMate session"
     assert output.count(banner) == 1
-    if startup_message:
-        assert output.index(startup_message) < output.index(banner)
+    assert output.index("service startup finished") < output.index(banner)
     assert output.index(banner) < output.index(f"agent received: {argument}")
     assert "All setup scripts completed successfully" not in output
+    assert ("continuing to the session for repairs" in output) == bool(
+        service_exit_code
+    )
 
 
 def test_setup_timeout_cleans_up_process_group(project, launch):
@@ -233,16 +254,14 @@ def test_setup_timeout_cleans_up_process_group(project, launch):
         project,
         {"setup": [{"run": "sleep 100 & echo $! > child.pid; wait", "timeout": 0.2}]},
     )
-    process = launch(["/bin/true"])
-    assert process.wait(timeout=8) == 0
+    process = launch()
+    assert process.wait(timeout=8) == 1
     pid = int((project / "child.pid").read_text())
     eventually(lambda: not running(pid))
     assert status(project)["setup"] == "failed"
 
 
-def test_real_services_setup_health_controls_hooks_and_cleanup(
-    project, launch, tmp_path
-):
+def test_background_services_setup_health_controls_and_hooks(project, launch, tmp_path):
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
@@ -276,7 +295,7 @@ def test_real_services_setup_health_controls_hooks_and_cleanup(
         },
     )
     process = launch()
-    eventually(lambda: (project / "session-ready").exists())
+    assert process.wait(timeout=12) == 0
     assert (project / "frontend/index.html").read_text() == "100%; ready"
     snapshot = status(project)
     assert snapshot["setup"] == "complete"
@@ -286,9 +305,15 @@ def test_real_services_setup_health_controls_hooks_and_cleanup(
     assert "100% started" in Path(services["worker"]["log"]).read_text()
 
     # Re-entering the same workspace must not rerun setup or replace services.
-    duplicate = launch(["/bin/true"])
+    supervisor_pid = int((manager.runtime_path(project) / "supervisor.pid").read_text())
+    assert running(supervisor_pid)
+    duplicate = launch()
     assert duplicate.wait(timeout=5) == 0
     assert (project / "setups").read_text() == "once\n"
+    assert (
+        int((manager.runtime_path(project) / "supervisor.pid").read_text())
+        == supervisor_pid
+    )
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -343,15 +368,16 @@ def test_real_services_setup_health_controls_hooks_and_cleanup(
     )
 
     child_pid = int((project / "backend/child.pid").read_text())
-    supervisor_pid = int((manager.runtime_path(project) / "supervisor.pid").read_text())
-    process.stdin.write(b"exit\n")
-    process.stdin.flush()
-    assert process.wait(timeout=12) == 0
-    eventually(lambda: not running(child_pid) and not running(supervisor_pid))
+    # A separate foreground command ending does not stop project services.
+    subprocess.run(["/bin/true"], check=True)
+    assert manager.http_ready(f"http://127.0.0.1:{port}/")
+    subprocess.run([sys.executable, str(RUNNER), "stop"], cwd=project, check=True)
+    eventually(lambda: not running(child_pid))
+    assert running(supervisor_pid)
     assert not manager.http_ready(f"http://127.0.0.1:{port}/")
 
 
-def test_readiness_timeout_keeps_service_and_session_available(project, launch):
+def test_readiness_timeout_leaves_background_service_running(project, launch):
     configure(
         project,
         {
@@ -363,19 +389,19 @@ def test_readiness_timeout_keeps_service_and_session_available(project, launch):
             }
         },
     )
-    launch()
-    eventually(lambda: (project / "session-ready").exists())
+    assert launch().wait(timeout=5) == 1
     assert "readiness timed out" in (project / "runner-0.log").read_text()
     assert status(project)["services"][0]["readiness"] == "not_ready"
 
 
-def test_sigterm_cleans_services_with_uncooperative_children(project, launch):
+def test_stop_kills_an_uncooperative_service(project, launch):
     configure(
         project,
         {
             "services": {
                 "worker": {
-                    "command": python_command(
+                    "command": "exec "
+                    + python_command(
                         "import os, signal, time; from pathlib import Path; "
                         "Path('child.pid').write_text(str(os.getpid())); signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(100)"
                     )
@@ -384,26 +410,26 @@ def test_sigterm_cleans_services_with_uncooperative_children(project, launch):
         },
     )
     process = launch()
-    eventually(lambda: (project / "session-ready").exists())
+    assert process.wait(timeout=5) == 0
     pid = int((project / "child.pid").read_text())
-    # Model tini -g forwarding Docker's stop signal to the foreground group.
-    os.killpg(process.pid, signal.SIGTERM)
-    assert process.wait(timeout=12) == 143
+    subprocess.run(
+        [sys.executable, str(RUNNER), "stop", "worker"],
+        cwd=project,
+        check=True,
+        timeout=10,
+    )
     eventually(lambda: not running(pid))
 
 
-def test_session_retains_tty_and_ctrl_c_does_not_stop_services(project):
+def test_separate_session_ctrl_c_and_exit_do_not_stop_services(project, launch):
     configure(project, {"services": {"worker": {"command": "sleep 100"}}})
+    assert launch().wait(timeout=5) == 0
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(project)
         os.execv(
             sys.executable,
             [
-                sys.executable,
-                str(RUNNER),
-                "run",
-                "--",
                 sys.executable,
                 "-u",
                 "-c",
@@ -434,6 +460,7 @@ def test_session_retains_tty_and_ctrl_c_does_not_stop_services(project):
         os.killpg(pid, signal.SIGTERM)
         os.waitpid(pid, 0)
         os.close(fd)
+    assert status(project)["services"][0]["process"] == "RUNNING"
 
 
 @pytest.mark.parametrize("agent", ["codex", "claude"])
@@ -460,10 +487,10 @@ def test_hook_reports_unavailable_manager_without_blocking(project, tmp_path):
     assert "unavailable" in output["hookSpecificOutput"]["additionalContext"]
 
 
-def test_bad_config_opens_session_and_records_failure(project, launch):
+def test_bad_config_returns_failure_and_records_error(project, launch):
     configure(project, {"setup": [{"run": "touch should-not-exist"}], "services": []})
-    process = launch(["/bin/true"])
-    assert process.wait(timeout=5) == 0
+    process = launch()
+    assert process.wait(timeout=5) == 1
     assert not (project / "should-not-exist").exists()
     assert status(project)["setup"] == "failed"
     assert (
@@ -472,7 +499,7 @@ def test_bad_config_opens_session_and_records_failure(project, launch):
     )
 
 
-def test_sigterm_during_setup_cleans_children_without_opening_session(project, launch):
+def test_sigterm_during_setup_cleans_children(project, launch):
     configure(project, {"setup": [{"run": "sleep 100 & echo $! > child.pid; wait"}]})
     process = launch()
     eventually(lambda: (project / "child.pid").exists())
@@ -480,15 +507,14 @@ def test_sigterm_during_setup_cleans_children_without_opening_session(project, l
     os.killpg(process.pid, signal.SIGTERM)
     assert process.wait(timeout=8) == 143
     eventually(lambda: not running(pid))
-    assert not (project / "session-ready").exists()
+    assert not manager.supervisor_running(manager.runtime_path(project))
 
 
-def test_service_start_failure_keeps_session_available(project, launch):
+def test_service_start_failure_is_reported(project, launch):
     configure(
         project, {"services": {"broken": {"command": "echo cannot-start; exit 9"}}}
     )
-    launch()
-    eventually(lambda: (project / "session-ready").exists())
+    assert launch().wait(timeout=12) == 1
     snapshot = status(project)
     assert snapshot["services"][0]["process"] == "FATAL"
     assert "cannot-start" in Path(snapshot["services"][0]["log"]).read_text()

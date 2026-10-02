@@ -397,11 +397,13 @@ services:
 - 每次容器启动按顺序执行 setup，每步默认超时 300 秒，可在该步骤设置 `timeout: 600`。脚本应保持幂等。某一步失败会跳过剩余 setup 和服务启动。
 - Supervisor 同时启动所有服务。可选的 `ready.http` 等待 HTTP 2xx 响应，默认超时 30 秒，可设置 `ready.timeout: 60`。不配置探测时，进程持续运行一秒即视为已启动。HTTP 探测不使用环境中的代理设置。
 - 配置、setup 或就绪检查失败会显示原因，仍允许进入 agent/shell 排查。就绪检查超时不会停止服务。Supervisor 会重试启动失败的服务，并在服务异常退出后自动重启。
-- 重新 attach 不重复执行 setup 或启动服务；detach 后服务继续运行。退出会话或停止容器时清理 Supervisor 及服务进程组。在 agent 中按 Ctrl+C 不会停止开发服务。
+- `codemate-services up` 执行 setup、启动后台 Supervisor、等待就绪后退出。容器入口随后打印提示并直接执行 Claude、Codex 或 shell；服务管理器不启动或等待 agent。
+- 重新 attach 不重复执行 setup 或启动服务。容器运行期间，Supervisor 和项目服务独立于 agent 会话，在 agent 中按 Ctrl+C 不会停止服务；停止容器时，后台进程也随之结束。
 
 在容器内仓库任意子目录中，可以执行：
 
 ```bash
+codemate-services up             # 初始化后台服务，不启动 agent
 codemate-services status
 codemate-services status --json   # 当前进程状态和 HTTP 就绪状态
 codemate-services logs web --follow
@@ -410,7 +412,7 @@ codemate-services stop web
 codemate-services start web
 ```
 
-运行状态和轮转日志放在 `/tmp/codemate-services-<uid>-<workspace-hash>`，不会写入仓库或共享的 CodeMate home。setup 输出写入 `setup.log`，配置或启动错误写入 `startup.log`；`status --json` 会返回日志位置。容器重建后这些日志会被删除。配置修改在下次容器启动时生效，`start` 和 `restart` 复用已加载的服务定义。
+运行状态和轮转日志放在 `/tmp/codemate-services-<uid>-<workspace-hash>`，不会写入仓库或共享的 CodeMate home。setup 输出写入 `setup.log`，配置或启动错误写入 `startup.log`；`status --json` 会返回日志位置。容器重建后这些日志会被删除。配置修改在下次容器启动时生效；如果尚未运行 Supervisor，也可用 `up` 在当前容器中初始化服务。已有 Supervisor 时，`up` 复用它且不重复 setup；`start` 和 `restart` 复用已加载的服务定义。setup 或就绪检查失败时 `up` 返回非零退出码，容器入口报告失败后仍启动会话供排查。
 
 workspace 插件在 `SessionStart` 检查当前服务状态，并将 setup 结果、进程状态、HTTP 就绪状态和日志位置加入 Claude/Codex 上下文。恢复会话时重新检查；hook 本身不安装依赖或启动服务。
 

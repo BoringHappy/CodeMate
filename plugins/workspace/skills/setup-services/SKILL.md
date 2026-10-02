@@ -99,15 +99,18 @@ or is created by an earlier setup step, and verify script names, entrypoints,
 CLI flags, ports, and readiness routes against the repository. A YAML syntax
 check alone does not establish that commands will start successfully.
 
-When the user requests a startup test, use the available development environment
-and inspect the resulting processes and HTTP probes. If CodeMate or required
+When the user requests a startup test, `codemate-services up` initializes
+background services without launching an agent; inspect the resulting processes
+and HTTP probes. It returns nonzero on setup or readiness failure. If CodeMate or required
 dependencies are unavailable, still produce the configuration and state which
 checks remain unverified. Do not require GitHub authentication or an open PR to
 create this file.
 
 Configuration is loaded on the next standard CodeMate container start;
 `--shell` and `--chat` also run setup, while `--pure` does not. Reattaching or
-resuming an agent does not reload configuration. `codemate-services restart`
+resuming an agent does not reload configuration. If Supervisor is not running,
+`up` can initialize services in the current container; otherwise it reuses the
+running Supervisor without rerunning setup. `codemate-services restart`
 reuses the already loaded definitions and does not rerun setup. Do not stop the
 current agent's container merely to apply a newly written configuration.
 
@@ -123,8 +126,10 @@ codemate-services restart web
 `status --json` reports the currently loaded processes and readiness checks;
 it does not validate or apply edits to the YAML. It also supplies log locations:
 `setup.log` contains setup output and `startup.log` contains configuration or
-startup errors. A setup failure skips remaining setup and service startup but
-still opens the agent; a readiness timeout leaves the service process running.
+startup errors. A setup failure skips remaining setup and service startup;
+the container entrypoint still opens the session for repairs. A readiness
+timeout leaves the service process running. The service manager never launches
+or waits for Claude, Codex, or a shell; services live in the container independently.
 Workspace SessionStart hooks report live service status to Codex and Claude,
 without launching services themselves.
 

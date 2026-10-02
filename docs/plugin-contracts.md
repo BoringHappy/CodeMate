@@ -101,8 +101,14 @@ agent (Claude Code or Codex), so plugins stay decoupled at the behavior layer.
 
 ## Project Service Status
 
-- The standard container reads `<repo>/.codemate/config.yaml` after repository
-  setup, runs setup commands, and owns Supervisor and service lifetimes.
+- After repository setup, the standard container calls `codemate-services up`
+  to read `<repo>/.codemate/config.yaml`, run setup commands, and start background
+  Supervisor services. The command returns after readiness checks; it never
+  launches an agent. `setup.sh` separately prints the session banner and execs
+  the foreground command, continuing even when service startup returns failure.
+- Services belong to the container and remain independent of agent sessions.
+  Repeated `up` calls reuse a running Supervisor without rerunning setup;
+  `start` and `restart` use loaded definitions rather than reloading the YAML.
 - Both workspace `SessionStart` hooks call `codemate-services status --json`
   from the event's Git worktree root. This is a read-only check, including on
   resume or compaction; it never reruns setup or starts services.

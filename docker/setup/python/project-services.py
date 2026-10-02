@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Run repository setup and supervised development services beside the agent."""
+"""Initialize and manage background development services for a repository."""
 
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ def supervisor_config(workspace, runtime, services):
         "chmod": "0700",
     }
     config["supervisord"] = {
-        "nodaemon": "true",
+        "nodaemon": "false",
         "silent": "true",
         "pidfile": str(runtime / "supervisor.pid"),
         "logfile": str(runtime / "supervisor.log"),
@@ -330,11 +330,20 @@ def status_snapshot(workspace):
     }
 
 
-def wait_ready(runtime, services, supervisor):
+def supervisor_running(runtime):
+    try:
+        with rpc_client(runtime) as client:
+            return client.supervisor.getState()["statename"] == "RUNNING"
+    except (OSError, http.client.HTTPException, xmlrpc.client.Error):
+        return False
+
+
+def wait_ready(runtime, services):
     pending = dict(services)
     started = time.monotonic()
+    succeeded = True
     while pending:
-        if supervisor.poll() is not None:
+        if not supervisor_running(runtime):
             raise RuntimeError(f"Supervisor exited; see {runtime / 'supervisor.log'}")
         states = process_states(runtime)
         for name, service in list(pending.items()):
@@ -344,12 +353,14 @@ def wait_ready(runtime, services, supervisor):
                 state == "EXITED" and states[name].get("exitstatus") == 0
             ):
                 message(f"{name}: {state}; see {service_log(runtime, name)}")
+                succeeded = False
                 del pending[name]
                 continue
             if time.monotonic() - started >= ready.get("timeout", 30):
                 message(
                     f"{name}: readiness timed out; see {service_log(runtime, name)}"
                 )
+                succeeded = False
                 del pending[name]
                 continue
             if state != "RUNNING":
@@ -360,32 +371,28 @@ def wait_ready(runtime, services, supervisor):
             del pending[name]
         if pending:
             time.sleep(0.2)
+    return succeeded
 
 
-def run(workspace, command):
+def up(workspace):
     if not (workspace / ".codemate/config.yaml").exists():
-        os.execvp(command[0], command)
+        return 0
     runtime = runtime_path(workspace)
     runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock = (runtime / "runner.lock").open("w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        message("Services are already managed for this workspace; reusing them")
-        os.execvp(command[0], command)
-
-    supervisor = foreground = None
+    lock = (runtime / "startup.lock").open("w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
 
     def shutdown(signum, _frame):
         raise Shutdown(signum)
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGHUP, shutdown)
-    # The foreground agent shares the TTY process group and receives Ctrl+C
-    # itself. Do not tear down project services when a prompt is interrupted.
-    signal.signal(signal.SIGINT, lambda *_: None)
+    signal.signal(signal.SIGINT, shutdown)
     startup = {"setup": "pending", "services": {}}
     try:
+        if supervisor_running(runtime):
+            message("Services are already managed for this workspace; reusing them")
+            return 0
         try:
             save_startup(runtime, startup)
             steps, services = load_config(workspace)
@@ -403,74 +410,52 @@ def run(workspace, command):
             if services:
                 path = supervisor_config(workspace, runtime, services)
                 with (runtime / "supervisor-start.log").open("w") as log:
-                    supervisor = subprocess.Popen(
+                    subprocess.run(
                         ["supervisord", "-c", str(path)],
                         stdin=subprocess.DEVNULL,
                         stdout=log,
                         stderr=subprocess.STDOUT,
-                        start_new_session=True,
+                        check=True,
+                        timeout=10,
                     )
-                wait_ready(runtime, services, supervisor)
+                ready = wait_ready(runtime, services)
                 message(
                     f"Logs: {runtime}; manage with codemate-services status/logs/restart/stop"
                 )
-        except (ValueError, OSError, RuntimeError, yaml.YAMLError) as error:
+                return 0 if ready else 1
+        except (
+            ValueError,
+            OSError,
+            RuntimeError,
+            yaml.YAMLError,
+            subprocess.SubprocessError,
+        ) as error:
             startup["error"] = f"{type(error).__name__}; see startup.log"
             if startup["setup"] != "complete":
                 startup["setup"] = "failed"
             (runtime / "startup.log").write_text(str(error) + "\n")
             save_startup(runtime, startup)
-            message(f"Project startup failed: {error}. Continuing into the session.")
-        foreground = subprocess.Popen(command)  # Inherit the original terminal.
-        code = foreground.wait()
-        return code if code >= 0 else 128 - code
+            message(f"Project startup failed: {error}")
+            return 1
+        return 0
     except Shutdown as error:
         return 128 + error.signum
     finally:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        # A shell can exit on TERM before an uncooperative child does. Supervisor
-        # then considers that program stopped, so remember its group for a final
-        # cleanup even when the group leader has already exited.
-        service_groups = [
-            item["pid"] for item in process_states(runtime).values() if item["pid"] > 0
-        ]
-        # Stop services first so docker stop's grace period reaches all groups.
-        if supervisor is not None and supervisor.poll() is None:
-            supervisor.terminate()
-        if foreground is not None and foreground.poll() is None:
-            foreground.terminate()
-            try:
-                foreground.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                foreground.kill()
-                foreground.wait()
-        if supervisor is not None:
-            try:
-                supervisor.wait(timeout=7)
-            except subprocess.TimeoutExpired:
-                terminate_group(supervisor)
-        for group in service_groups:
-            try:
-                os.killpg(group, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         lock.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "action", choices=["run", "status", "logs", "start", "stop", "restart"]
+        "action", choices=["up", "status", "logs", "start", "stop", "restart"]
     )
     parser.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     workspace = workspace_path()
-    if args.action == "run":
-        command = args.args[1:] if args.args[:1] == ["--"] else args.args
-        if not command:
-            parser.error("run requires a foreground command after --")
-        return run(workspace, command)
+    if args.action == "up":
+        if args.args:
+            parser.error("up does not accept a foreground command")
+        return up(workspace)
     runtime = runtime_path(workspace)
     if args.action == "status" and args.args == ["--json"]:
         print(json.dumps(status_snapshot(workspace)))
