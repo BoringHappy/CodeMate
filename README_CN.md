@@ -372,6 +372,8 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 
 在自己的仓库中，让 Codex 使用 `workspace:setup-services` skill，或在 Claude Code 中调用 `/workspace:setup-services`，即可创建或更新配置。skill 会检查已有开发命令和锁文件，按项目实际情况配置依赖安装、服务启动和就绪检查。
 
+本仓库包含一个无需额外依赖的[空 HTTP 服务示例](examples/empty-service/README.md)，通过 [`.codemate/config.yaml`](.codemate/config.yaml) 配置，监听 8000 端口。
+
 ```yaml
 setup:
   - cwd: backend

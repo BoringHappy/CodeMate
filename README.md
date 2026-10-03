@@ -349,6 +349,10 @@ Use the `workspace:setup-services` skill in Codex or
 your repository. The skill inspects existing development commands and lockfiles,
 then configures dependency setup, services, and readiness checks.
 
+This repository includes a [minimal HTTP service example](examples/empty-service/README.md)
+on port 8000, configured in [`.codemate/config.yaml`](.codemate/config.yaml),
+with no extra dependencies.
+
 ```yaml
 setup:
   - cwd: backend
