@@ -269,7 +269,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 **预装的浏览器自动化工具：**
 
-基础镜像已内置 [Playwright](https://playwright.dev/) CLI，进行浏览器自动化无需再安装工具本身。镜像不包含浏览器，可按需下载所需浏览器：
+基础镜像已内置 [Playwright](https://playwright.dev/) CLI 和 Chromium 系统依赖，启动 Chromium 无需再安装系统依赖。镜像不包含浏览器，可按需下载所需浏览器：
 
 ```bash
 playwright --version
@@ -278,10 +278,10 @@ playwright screenshot "https://example.com" /tmp/page.png
 npx playwright test
 ```
 
-浏览器会下载到当前用户的缓存目录（`~/.cache/ms-playwright`），无需 root 权限。如果浏览器因缺少系统库而无法启动，可安装一次系统依赖：
+浏览器会下载到当前用户的缓存目录（`~/.cache/ms-playwright`），无需 root 权限。使用 Firefox 或 WebKit 时，可按需安装它们额外的系统依赖：
 
 ```bash
-sudo "$(command -v playwright)" install-deps chromium
+sudo "$(command -v playwright)" install-deps firefox webkit
 ```
 
 ## 基于 Issue 的工作流

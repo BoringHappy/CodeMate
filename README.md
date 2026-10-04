@@ -277,7 +277,7 @@ codemate --build -f ./Dockerfile.custom --tag codemate:custom --branch feature/x
 
 **Preinstalled Browser Automation:**
 
-The base image ships the [Playwright](https://playwright.dev/) CLI, so browser automation needs no extra tooling. Browsers are not bundled — download the ones your project needs on demand:
+The base image ships the [Playwright](https://playwright.dev/) CLI and Chromium system dependencies, so Chromium needs no additional OS packages. Browsers are not bundled — download the ones your project needs on demand:
 
 ```bash
 playwright --version
@@ -286,10 +286,10 @@ playwright screenshot "https://example.com" /tmp/page.png
 npx playwright test
 ```
 
-Browsers are downloaded into the current user's cache (`~/.cache/ms-playwright`) and need no elevated privileges. If a browser fails to launch because system libraries are missing, install the OS dependencies once:
+Browsers are downloaded into the current user's cache (`~/.cache/ms-playwright`) and need no elevated privileges. For Firefox or WebKit, install their additional system dependencies as needed:
 
 ```bash
-sudo "$(command -v playwright)" install-deps chromium
+sudo "$(command -v playwright)" install-deps firefox webkit
 ```
 
 ## Environment Variables
