@@ -48,7 +48,7 @@ def bundle_id(source: Path) -> str:
 
 
 @contextmanager
-def locked(path: Path, *, wait: bool = False) -> Iterator[None]:
+def locked(path: Path, *, wait: bool = False) -> Iterator[int]:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with path.open("a") as handle:
         try:
@@ -58,7 +58,7 @@ def locked(path: Path, *, wait: bool = False) -> Iterator[None]:
                 "Another CodeMate host session is using this worktree. Use a separate git worktree."
             ) from exc
         try:
-            yield
+            yield handle.fileno()
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
@@ -124,6 +124,7 @@ def native_command(
     if agent == "codex":
         command = [
             "codex",
+            "--yolo",
             "--no-daemon",
             "--no-alt-screen",
             "-c",
@@ -256,10 +257,20 @@ def github_target(cwd: Path, branch: str = "") -> tuple[list[str], str]:
     return ["--repo", repository], f"{owner}:{branch}" if branch else ""
 
 
+def github_output(command: list[str], cwd: Path, env: dict[str, str]) -> str:
+    result = subprocess.run(
+        command, cwd=cwd, env=env, text=True, capture_output=True, check=False
+    )
+    if result.returncode:
+        detail = result.stderr.strip() or f"exit code {result.returncode}"
+        raise SystemExit(f"GitHub CLI failed during {' '.join(command[:3])}: {detail}")
+    return result.stdout.strip()
+
+
 def read_pr(args: SimpleNamespace, cwd: Path, env: dict[str, str]) -> dict:
     if not getattr(args, "pr", None):
         return {}
-    result = subprocess.run(
+    output = github_output(
         [
             "gh",
             "pr",
@@ -269,17 +280,10 @@ def read_pr(args: SimpleNamespace, cwd: Path, env: dict[str, str]) -> dict:
             "--json",
             "number,url,state,headRefName,headRefOid,baseRefName",
         ],
-        cwd=cwd,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
+        cwd,
+        env,
     )
-    if result.returncode:
-        raise SystemExit(
-            "Cannot read the requested PR with the host's gh authentication."
-        )
-    data = json.loads(result.stdout)
+    data = json.loads(output)
     if data["state"] != "OPEN":
         raise SystemExit("--host --pr requires an open PR.")
     if data["baseRefName"] not in {"main", "master"}:
@@ -315,20 +319,26 @@ def base_reference(cwd: Path, requested: str | None) -> tuple[str, str]:
     )
 
 
-def registered_worktrees(cwd: Path) -> dict[str, Path]:
-    worktrees = {}
+def worktree_records(cwd: Path) -> list[dict[str, str]]:
+    records = []
     record = {}
     for field in git_output(cwd, "worktree", "list", "--porcelain", "-z").split("\0"):
         if not field:
-            if "branch" in record and "worktree" in record:
-                worktrees[record["branch"].removeprefix("refs/heads/")] = Path(
-                    record["worktree"]
-                ).resolve()
+            if "worktree" in record:
+                records.append(record)
             record = {}
         else:
             key, _, value = field.partition(" ")
             record[key] = value
-    return worktrees
+    return records
+
+
+def registered_worktrees(cwd: Path) -> dict[str, Path]:
+    return {
+        record["branch"].removeprefix("refs/heads/"): Path(record["worktree"]).resolve()
+        for record in worktree_records(cwd)
+        if "branch" in record
+    }
 
 
 @dataclass(frozen=True)
@@ -348,6 +358,15 @@ class WorktreePlan:
     @property
     def branch_key(self) -> str:
         return hashlib.sha256(self.branch.encode()).hexdigest()[:16]
+
+    @property
+    def lock_directory(self) -> Path:
+        # Shared by every linked worktree and independent of CODEMATE_HOME.
+        return self.common_dir / "codemate-host-locks"
+
+    @property
+    def session_lock(self) -> Path:
+        return self.lock_directory / f"{self.branch_key}.lock"
 
 
 def plan_worktree(
@@ -397,7 +416,7 @@ def plan_worktree(
 def prepare_worktree(plan: WorktreePlan, home: Path, env: dict[str, str]) -> Path:
     # Serialize repository metadata changes, while task sessions on distinct
     # branches retain independent locks and can run concurrently.
-    with locked(home / "locks" / f"{plan.repository_key}.repository.lock", wait=True):
+    with locked(plan.lock_directory / "repository.lock", wait=True):
         if not env.get("CODEMATE_NO_PR") and plan.base_ref.startswith("refs/remotes/"):
             remote = plan.base_ref.split("/")[2]
             subprocess.run(
@@ -425,10 +444,40 @@ def prepare_worktree(plan: WorktreePlan, home: Path, env: dict[str, str]) -> Pat
                     f"Branch {plan.branch} is checked out in the primary checkout. Switch that checkout to main/master before starting its host worktree."
                 )
             return existing
-        if plan.path.exists():
+        detached = any(
+            "detached" in record and Path(record["worktree"]).resolve() == plan.path
+            for record in worktree_records(plan.repository)
+        )
+        if plan.path.exists() and not (plan.pr_number and detached):
             raise SystemExit(
                 f"Worktree destination already exists but is not registered: {plan.path}"
             )
+        if detached:
+            if (
+                git_output(plan.path, "status", "--porcelain")
+                or git_output(
+                    plan.path, "rev-list", "--count", f"{plan.base_ref}..HEAD"
+                )
+                != "0"
+            ):
+                raise SystemExit(
+                    f"Cannot resume PR checkout in {plan.path}: detached worktree has changes or commits beyond the base. Preserve that work before retrying."
+                )
+            subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "checkout",
+                    plan.pr_number,
+                    *github_target(plan.path)[0],
+                    "--branch",
+                    plan.branch,
+                ],
+                cwd=plan.path,
+                env=env,
+                check=True,
+            )
+            return plan.path
         plan.path.parent.mkdir(parents=True, exist_ok=True)
         command = ["git", "-C", str(plan.repository), "worktree", "add"]
         if has_ref(plan.repository, f"refs/heads/{plan.branch}"):
@@ -477,7 +526,7 @@ def prepare_pr(
     if plan.pr_number:
         pr = read_pr(args, cwd, env)
     else:
-        result = subprocess.run(
+        output = github_output(
             [
                 "gh",
                 "pr",
@@ -490,13 +539,10 @@ def prepare_pr(
                 "--json",
                 "number,url,baseRefName",
             ],
-            cwd=cwd,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=True,
+            cwd,
+            env,
         )
-        candidates = json.loads(result.stdout)
+        candidates = json.loads(output)
         matches = [pr for pr in candidates if pr["baseRefName"] == plan.base_branch]
         if candidates and not matches:
             raise SystemExit(f"The existing PR base must match {plan.base_branch}.")
@@ -563,7 +609,7 @@ def prepare_pr(
         with tempfile.TemporaryDirectory(prefix="codemate-pr-") as temporary:
             body_file = Path(temporary) / "body.md"
             body_file.write_text(body)
-            created = subprocess.run(
+            created = github_output(
                 [
                     "gh",
                     "pr",
@@ -579,13 +625,10 @@ def prepare_pr(
                     "--body-file",
                     str(body_file),
                 ],
-                cwd=cwd,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=True,
+                cwd,
+                env,
             )
-        url = created.stdout.strip().splitlines()[-1]
+        url = created.splitlines()[-1] if created else ""
         number = url.rstrip("/").rsplit("/", 1)[-1]
         if not number.isdigit():
             raise SystemExit(f"Cannot identify the newly created PR: {url}")
@@ -736,7 +779,7 @@ def run_host(args: SimpleNamespace) -> None:
         print(f"Worktree: {plan.path} (create/reuse; base {plan.base_ref})")
         print(shlex.join(command))
         return
-    with locked(home / "locks" / f"{plan.repository_key}-{plan.branch_key}.lock"):
+    with locked(plan.session_lock) as session_fd:
         cwd = prepare_worktree(plan, home, env)
         print(f"Worktree: {cwd}")
         env["CODEMATE_REPO_DIR"] = str(cwd)
@@ -756,5 +799,7 @@ def run_host(args: SimpleNamespace) -> None:
                 getattr(args, "query", None) or "",
                 chat=chat,
             )
-        subprocess.run(command, cwd=cwd, env=env, check=True)
+        # Keep the lock in the agent too. If the launcher is killed, another
+        # session cannot enter this branch while its agent is still running.
+        subprocess.run(command, cwd=cwd, env=env, check=True, pass_fds=(session_fd,))
         print(f"Worktree retained: {cwd}")

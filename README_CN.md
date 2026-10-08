@@ -95,8 +95,9 @@ codemate --host --branch feature/my-task --base-branch master --dry-run
 ```
 
 先在宿主机安装并登录所选 agent。Host 模式需要 Git、bash、jq；PR 自动化
-还需要已经认证的 GitHub CLI。沿用 agent 的登录、模型、MCP 和权限配置，
-不添加容器中的权限绕过参数。Codex 提示信任插件 hooks 时，需要检查并
+还需要已经认证的 GitHub CLI。沿用 agent 的登录、模型和 MCP 配置；
+Codex 使用 `--yolo --no-daemon --no-alt-screen`，跳过审批和沙箱限制；
+Claude 保留原生权限配置。Codex 提示信任插件 hooks 时，需要检查并
 信任后才能使用 PR 监控。
 
 必须指定一个目标：新任务使用 `--branch`，已有 PR 使用 `--pr`，issue 使用
@@ -110,7 +111,9 @@ CodeMate 在 `${CODEMATE_HOME:-~/.codemate}/host/worktrees/<仓库>/<分支>/`
 原始 checkout 的分支和未提交修改保持原样。任务分支不能是 main/master，
 也不能已被主 checkout 检出。已有 linked worktree 会复用，退出后保留；
 PR 自动化要求目标 worktree 启动时干净。同一仓库、同一任务分支只允许一个
-CodeMate host 实例，不同任务分支可以并行。此锁不会阻止其他编辑器或普通
+CodeMate host 实例，包括使用不同 `CODEMATE_HOME` 的实例。锁位于共享
+Git 目录的 `codemate-host-locks/` 下，由 agent 继承；即使启动器被终止，
+agent 仍持有锁。不同任务分支可以并行。此锁不会阻止其他编辑器或普通
 agent 会话修改文件。
 
 启动 agent 前，CodeMate 更新已有远端 base 引用，查找任务已有 PR；没有时
@@ -118,6 +121,9 @@ agent 会话修改文件。
 到 origin，使用仓库 PR 模板和可选 `--pr-title`，并写入监控所需的 PR 状态。
 有 upstream 的 fork 仓库会向 upstream 创建 PR。初始化失败不会启动 agent；
 重试会复用 worktree 和已有 PR。
+首次 PR checkout 失败后可以在已注册的 detached worktree 中重试，但要求
+没有未提交修改或超出 base 的提交；存在这些工作时会提示先保留，避免覆盖。
+GitHub CLI 失败时会显示原始错误原因。
 默认注入共用的 system prompt 和 host 工作流指令，让 agent 读取 PR、完成后
 commit/push，并监控反馈和 CI。`--no-pr` 跳过启动 push/PR 创建，只做本地提交。
 `--chat` 还会跳过工作流指令和 Stop 自动化。Host 不执行项目 setup 或启动服务。

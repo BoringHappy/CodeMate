@@ -98,8 +98,9 @@ codemate --host --branch feature/my-task --base-branch master --dry-run
 
 Install and sign in to the selected agent locally first. Host mode requires
 Git, bash, jq, and (for PR automation) an authenticated GitHub CLI. It retains
-native agent credentials, model/MCP configuration, and permission settings;
-it does not enable the container's permission bypass flags. Review and trust
+native agent credentials and model/MCP configuration. Codex launches with
+`--yolo --no-daemon --no-alt-screen`, bypassing approval prompts and sandboxing;
+Claude retains its native permission settings. Review and trust
 the host plugin hooks when Codex asks before relying on PR monitoring.
 
 Specify exactly one target: `--branch` for a new task, `--pr` for an open PR,
@@ -115,8 +116,10 @@ launches the agent **in that worktree**. The original checkout and its uncommitt
 changes remain intact. The task branch cannot be main/master or be checked out
 in the primary checkout. Existing linked worktrees are reused and retained on
 exit; PR automation requires the target worktree to be clean at launch.
-A lock prevents concurrent CodeMate sessions on the same repository/branch;
-different task branches can run concurrently. Locks do not prevent other
+A lock under the shared Git directory (`codemate-host-locks/`) prevents concurrent
+CodeMate sessions on the same repository/branch, including sessions with different
+`CODEMATE_HOME` values. The agent inherits the lock so it remains protected if
+its launcher is killed. Different task branches can run concurrently. Locks do not prevent other
 editors or plain agent sessions from changing your files.
 
 Before launching the agent, CodeMate refreshes an available remote base ref,
@@ -125,6 +128,9 @@ base. For a new PR it adds an initial empty commit if needed, pushes to origin,
 uses the repository PR template and optional `--pr-title`, and records the PR
 for monitoring. Forks with an upstream remote create the PR in upstream.
 A failed setup stops before agent launch; retries reuse the worktree and PR.
+Failed PR checkouts can resume in the registered detached worktree if it has
+no uncommitted changes or commits beyond the base. Otherwise startup asks you
+to preserve that work first. GitHub CLI failures include the underlying error.
 The shared default system prompt plus host workflow instructions tell the agent
 to read PR context, commit/push completed changes, and monitor feedback and CI.
 `--no-pr` skips startup push/PR creation and commits locally. `--chat` also skips

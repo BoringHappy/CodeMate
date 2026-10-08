@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -74,8 +76,7 @@ def test_cli_dispatch_bypasses_container_setup(checkout, monkeypatch):
         main.app, ["--host", "--branch", "feature/host", "--dry-run"]
     )
     assert result.exit_code == 0, result.output
-    assert "codex --no-daemon" in result.output
-    assert "--yolo" not in result.output
+    assert "codex --yolo --no-daemon --no-alt-screen" in result.output
     assert not (Path(os.environ["CODEMATE_HOME"])).exists()
     assert not (checkout / ".env").exists()
 
@@ -127,8 +128,9 @@ def test_primary_task_branch_is_not_force_checked_out(checkout):
         host.prepare_worktree(plan, home, dict(os.environ))
 
 
+@pytest.mark.parametrize("retry_creation", [False, True])
 def test_startup_creates_draft_pr_before_agent_and_reuses_it(
-    checkout, tmp_path, monkeypatch
+    checkout, tmp_path, monkeypatch, retry_creation
 ):
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
@@ -140,8 +142,10 @@ def test_startup_creates_draft_pr_before_agent_and_reuses_it(
     calls = []
     created = []
     launched = []
+    failed = False
 
     def run(command, **kwargs):
+        nonlocal failed
         if command[:3] == ["gh", "pr", "list"]:
             return subprocess.CompletedProcess(command, 0, json.dumps(created))
         if command[:3] == ["gh", "pr", "checkout"]:
@@ -152,6 +156,11 @@ def test_startup_creates_draft_pr_before_agent_and_reuses_it(
             assert command[command.index("--title") + 1] == "Task title"
             assert Path(command[command.index("--body-file") + 1]).is_file()
             assert host.has_ref(remote, "refs/heads/feature/host")
+            if retry_creation and not failed:
+                failed = True
+                return subprocess.CompletedProcess(
+                    command, 1, "", "Permission denied creating PR"
+                )
             created.append(
                 {
                     "number": 123,
@@ -175,6 +184,14 @@ def test_startup_creates_draft_pr_before_agent_and_reuses_it(
         return real_run(command, **kwargs)
 
     monkeypatch.setattr(host.subprocess, "run", run)
+    if retry_creation:
+        with pytest.raises(SystemExit, match="Permission denied creating PR"):
+            host.run_host(args(pr_title="Task title"))
+        assert not launched
+        assert (
+            host.git_output(checkout, "rev-list", "--count", "main..feature/host")
+            == "1"
+        )
     host.run_host(args(pr_title="Task title"))
     host.run_host(args(pr_title="Task title"))
     assert calls == ["create", "agent", "agent"]
@@ -238,6 +255,181 @@ def test_requested_pr_is_checked_out_in_linked_worktree(checkout, monkeypatch):
     assert host.git_output(checkout, "branch", "--show-current") == "main"
     with pytest.raises(SystemExit, match="must match"):
         host.run_host(args(branch=None, pr="42", base_branch="master", dry_run=True))
+
+
+@pytest.mark.parametrize("unfinished", [None, "files", "commits"])
+def test_failed_pr_checkout_can_retry_without_discarding_work(
+    checkout, monkeypatch, unfinished
+):
+    real_run = subprocess.run
+    failure = True
+    pr = {
+        "number": 42,
+        "state": "OPEN",
+        "baseRefName": "main",
+        "headRefName": "feature/from-pr",
+    }
+
+    def run(command, **kwargs):
+        if command[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(command, 0, json.dumps(pr))
+        if command[:3] == ["gh", "pr", "checkout"]:
+            if failure:
+                raise subprocess.CalledProcessError(1, command)
+            return real_run(["git", "switch", "-qc", "feature/from-pr"], **kwargs)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host.subprocess, "run", run)
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    env = dict(os.environ, CODEMATE_NO_PR="true")
+    plan = host.plan_worktree(args(branch=None, pr="42"), checkout, home, env)
+    with pytest.raises(subprocess.CalledProcessError):
+        host.prepare_worktree(plan, home, env)
+    assert plan.path.is_dir()
+    assert host.git_output(plan.path, "branch", "--show-current") == ""
+    failure = False
+    if unfinished:
+        (plan.path / "user-work.txt").write_text("preserve me")
+        if unfinished == "commits":
+            real_run(["git", "add", "user-work.txt"], cwd=plan.path, check=True)
+            real_run(
+                ["git", "commit", "-qm", "Detached task work"],
+                cwd=plan.path,
+                check=True,
+            )
+        with pytest.raises(SystemExit, match="Preserve"):
+            host.prepare_worktree(plan, home, env)
+        assert (plan.path / "user-work.txt").read_text() == "preserve me"
+        assert host.git_output(checkout, "branch", "--show-current") == "main"
+        return
+    assert host.prepare_worktree(plan, home, env) == plan.path
+    assert host.git_output(plan.path, "branch", "--show-current") == "feature/from-pr"
+    assert host.git_output(checkout, "branch", "--show-current") == "main"
+
+
+def test_task_locks_span_homes_processes_and_agent_lifetime(
+    checkout, tmp_path, monkeypatch
+):
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    agent = binary / "codex"
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import json,os,sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['TEST_HOST_READY']).write_text(json.dumps({'pid':os.getpid(),'cwd':os.getcwd()}))\n"
+        "sys.stdin.read()\n"
+    )
+    agent.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binary) + os.pathsep + os.environ["PATH"])
+    ready = tmp_path / "ready.json"
+    command = [
+        sys.executable,
+        "-m",
+        "cli.main",
+        "--host",
+        "--branch",
+        "feature/host",
+        "--chat",
+    ]
+    env = dict(os.environ, TEST_HOST_READY=str(ready))
+    # Suppress the TUI with a real executable stub; Git, worktree creation,
+    # plugin publication and kernel locks all run in separate processes.
+    process = subprocess.Popen(
+        command,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    agent_pid = None
+    try:
+        for _ in range(100):
+            if ready.exists():
+                break
+            if process.poll() is not None:
+                pytest.fail(process.stderr.read().decode())
+            time.sleep(0.05)
+        assert ready.exists(), "Agent did not start"
+        data = json.loads(ready.read_text())
+        agent_pid = data["pid"]
+        assert Path(data["cwd"]) != checkout
+        alternate = dict(
+            env,
+            CODEMATE_HOME=str(tmp_path / "other home"),
+            TEST_HOST_READY=str(tmp_path / "other.json"),
+        )
+        duplicate = subprocess.run(
+            command,
+            env=alternate,
+            input="",
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        assert duplicate.returncode != 0
+        assert "Another CodeMate" in duplicate.stderr
+        independent = command.copy()
+        independent[independent.index("--branch") + 1] = "feature/other"
+        result = subprocess.run(
+            independent,
+            env=alternate,
+            input="",
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert host.git_output(checkout, "branch", "--show-current") == "main"
+        process.kill()
+        process.wait(timeout=5)
+        duplicate = subprocess.run(
+            command,
+            env=alternate,
+            input="",
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        assert duplicate.returncode != 0, (
+            "Live agent lost its branch lock when its launcher exited"
+        )
+        assert "Another CodeMate" in duplicate.stderr
+        process.stdin.close()
+        # Wait for the child to finish reading EOF and release its inherited
+        # lock before proving the branch can be reused.
+        plan = host.plan_worktree(args(), checkout, tmp_path / "other home/host", env)
+        for _ in range(100):
+            try:
+                with host.locked(plan.session_lock):
+                    break
+            except SystemExit:
+                time.sleep(0.05)
+        else:
+            pytest.fail("Agent exit did not release the lock")
+        result = subprocess.run(
+            command,
+            env=alternate,
+            input="",
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    finally:
+        if process.stdin and not process.stdin.closed:
+            process.stdin.close()
+        if process.poll() is None:
+            process.wait(timeout=5)
+        if agent_pid:
+            try:
+                os.kill(agent_pid, 15)
+            except ProcessLookupError:
+                pass
 
 
 def test_issue_selects_task_branch(checkout):
