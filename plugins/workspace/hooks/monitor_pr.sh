@@ -76,6 +76,12 @@ save_monitor_state() {
 
 acquire_branch_monitor() {
     exec 8>"$BRANCH_MONITOR_LOCK_FILE"
+    # A host Stop checks once; another session already checking this branch
+    # must not leave this hook waiting for its lease.
+    if [ "${CODEMATE_MODE:-}" = "host" ]; then
+        codemate_flock -n 8
+        return $?
+    fi
     while session_can_poll; do
         codemate_flock -n 8 && return 0
         sleep 1
@@ -367,6 +373,12 @@ main() {
         IFS=',' read -r -a delays <<< "$CODEMATE_MONITOR_DELAYS"
     else
         delays=(0 10 30 60 120)
+    fi
+    # Native sessions query once per Stop, without retries or backoff. This
+    # also lets Codex submit messages still held in its TUI when Stop returns.
+    if [ "${CODEMATE_MODE:-}" = "host" ]; then
+        delays=(0)
+        MAX_POLLS=1
     fi
 
     SESSION_ID=$(codemate_session_id "$HOOK_INPUT") || exit 0

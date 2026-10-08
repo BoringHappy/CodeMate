@@ -577,6 +577,11 @@ CODEMATE_CUSTOM_PLUGINS=example-skill@my-plugins
 
 ## PR Comment 监控
 
+Host 会话（`codemate --host`）中的 Codex 和 Claude 每次 Stop 只检查一轮 PR
+反馈，不退避等待或循环重试。如果其他会话正在检查该分支，则跳过本次检查。
+检查时发现反馈仍会触发 continuation；之后到达的反馈在下次 Stop 时检查。
+下面的持续轮询方案适用于容器会话。
+
 CodeMate 通过 workspace 插件的原生 `Stop` hook 监控 PR feedback。第一次检查立即运行，后续检查按 10、30、60、120 秒退避，最大间隔保持 120 秒，每次最多检查 30 轮；不再依赖 cron，也不再通过 tmux 注入 prompt。Claude 使用 `asyncRewake` 在后台 polling，保持 UI 可交互；Codex 使用同步 Stop continuation contract，在收到反馈后原生创建下一轮处理。
 
 Codex 会持续执行这一轮询周期，不再等待 5 秒就退出。可通过 `CODEMATE_MONITOR_MAX_SECONDS` 设置额外时间限制，默认 `0` 表示不限制。已提交的 prompt 和 Codex 持久化队列中的消息会结束监控；暂存在 TUI 内存中的 Tab 消息不会中断监控。
