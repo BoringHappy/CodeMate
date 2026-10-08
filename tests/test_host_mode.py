@@ -16,7 +16,14 @@ from cli import host, main
 
 def args(**values):
     return SimpleNamespace(
-        **{"agent": "codex", "env": [], "env_file": [], "host": True, **values}
+        **{
+            "agent": "codex",
+            "env": [],
+            "env_file": [],
+            "host": True,
+            "branch": "feature/host",
+            **values,
+        }
     )
 
 
@@ -24,7 +31,7 @@ def args(**values):
 def checkout(tmp_path, monkeypatch):
     repo = tmp_path / "project with spaces"
     repo.mkdir()
-    subprocess.run(["git", "init", "-qb", "feature/host", str(repo)], check=True)
+    subprocess.run(["git", "init", "-qb", "main", str(repo)], check=True)
     subprocess.run(
         [
             "git",
@@ -49,6 +56,11 @@ def checkout(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEMATE_HOME", str(tmp_path / "codemate home"))
     monkeypatch.delenv("CODEMATE_RUNTIME_DIR", raising=False)
     monkeypatch.chdir(repo)
+    monkeypatch.delenv("CODEMATE_AGENT", raising=False)
+    monkeypatch.delenv("CODEMATE_NO_PR", raising=False)
+    monkeypatch.delenv("CODEMATE_CHAT", raising=False)
+    subprocess.run(["git", "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], check=True)
     return repo
 
 
@@ -58,12 +70,205 @@ def test_cli_dispatch_bypasses_container_setup(checkout, monkeypatch):
 
     monkeypatch.setattr(main, "ensure_global_config", unexpected)
     monkeypatch.setattr(main, "resolve_config", unexpected)
-    result = CliRunner().invoke(main.app, ["--host", "--agent", "codex", "--dry-run"])
+    result = CliRunner().invoke(
+        main.app, ["--host", "--branch", "feature/host", "--dry-run"]
+    )
     assert result.exit_code == 0, result.output
     assert "codex --no-daemon" in result.output
     assert "--yolo" not in result.output
     assert not (Path(os.environ["CODEMATE_HOME"])).exists()
     assert not (checkout / ".env").exists()
+
+
+def test_host_requires_an_explicit_target(checkout):
+    result = CliRunner().invoke(main.app, ["--host", "--dry-run"])
+    assert result.exit_code == 1
+    assert "Specify --branch" in result.output
+    assert not Path(os.environ["CODEMATE_HOME"]).exists()
+
+
+def test_codex_is_default_for_host_and_container(checkout):
+    host.run_host(args(agent=None, dry_run=True))
+    assert (
+        next(field for field in main.FIELDS if field.name == "CODEMATE_AGENT").default
+        == "codex"
+    )
+
+
+@pytest.mark.parametrize("branch", ["main", "master"])
+def test_base_branch_detection_and_linked_worktree(checkout, branch):
+    subprocess.run(["git", "branch", "-m", branch], cwd=checkout, check=True)
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    plan = host.plan_worktree(args(), checkout, home, dict(os.environ))
+    assert plan.base_branch == branch
+    worktree = host.prepare_worktree(plan, home, dict(os.environ))
+    assert (worktree / ".git").is_file()
+    assert host.git_output(worktree, "branch", "--show-current") == "feature/host"
+    assert host.git_output(checkout, "branch", "--show-current") == branch
+    assert host.prepare_worktree(plan, home, dict(os.environ)) == worktree
+
+
+def test_unsupported_or_missing_base_is_rejected(checkout):
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    with pytest.raises(SystemExit, match="must be main or master"):
+        host.plan_worktree(
+            args(base_branch="develop"), checkout, home, dict(os.environ)
+        )
+    subprocess.run(["git", "branch", "-m", "develop"], cwd=checkout, check=True)
+    with pytest.raises(SystemExit, match="No main/master"):
+        host.plan_worktree(args(), checkout, home, dict(os.environ))
+
+
+def test_primary_task_branch_is_not_force_checked_out(checkout):
+    subprocess.run(["git", "switch", "-qc", "feature/host"], cwd=checkout, check=True)
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    plan = host.plan_worktree(args(), checkout, home, dict(os.environ))
+    with pytest.raises(SystemExit, match="primary checkout"):
+        host.prepare_worktree(plan, home, dict(os.environ))
+
+
+def test_startup_creates_draft_pr_before_agent_and_reuses_it(
+    checkout, tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote)], cwd=checkout, check=True
+    )
+    subprocess.run(["git", "push", "-qu", "origin", "main"], cwd=checkout, check=True)
+    real_run = subprocess.run
+    calls = []
+    created = []
+    launched = []
+
+    def run(command, **kwargs):
+        if command[:3] == ["gh", "pr", "list"]:
+            return subprocess.CompletedProcess(command, 0, json.dumps(created))
+        if command[:3] == ["gh", "pr", "checkout"]:
+            return subprocess.CompletedProcess(command, 0)
+        if command[:3] == ["gh", "pr", "create"]:
+            assert command[command.index("--base") + 1] == "main"
+            assert "--draft" in command
+            assert command[command.index("--title") + 1] == "Task title"
+            assert Path(command[command.index("--body-file") + 1]).is_file()
+            assert host.has_ref(remote, "refs/heads/feature/host")
+            created.append(
+                {
+                    "number": 123,
+                    "url": "https://github.com/test/repo/pull/123",
+                    "baseRefName": "main",
+                }
+            )
+            calls.append("create")
+            return subprocess.CompletedProcess(command, 0, created[0]["url"] + "\n")
+        if command[0] == "codex":
+            assert created
+            assert kwargs["env"]["CODEMATE_PR_NUMBER"] == "123"
+            prompt = next(
+                item for item in command if item.startswith("developer_instructions=")
+            )
+            assert "CRITICAL WORKFLOW REQUIREMENTS" in prompt
+            assert "prepared PR #123" in prompt
+            launched.append(host.git_output(kwargs["cwd"], "rev-parse", "HEAD"))
+            calls.append("agent")
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host.subprocess, "run", run)
+    host.run_host(args(pr_title="Task title"))
+    host.run_host(args(pr_title="Task title"))
+    assert calls == ["create", "agent", "agent"]
+    assert launched[0] == launched[1]
+    runtime = Path(os.environ["CODEMATE_HOME"]) / "host/runtime/pr-status"
+    assert [
+        json.loads(path.read_text())["number"] for path in runtime.glob("*.json")
+    ] == [123]
+    assert host.git_output(checkout, "rev-list", "--count", "main..feature/host") == "1"
+
+
+def test_pr_creation_failure_prevents_agent_start(checkout, monkeypatch):
+    monkeypatch.setattr(
+        host,
+        "prepare_pr",
+        lambda *a, **kw: (_ for _ in ()).throw(SystemExit("PR setup failed")),
+    )
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        assert command[0] != "codex", "Agent started before PR setup succeeded"
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host.subprocess, "run", run)
+    with pytest.raises(SystemExit, match="PR setup failed"):
+        host.run_host(args())
+
+
+def test_requested_pr_is_checked_out_in_linked_worktree(checkout, monkeypatch):
+    real_run = subprocess.run
+    pr = {
+        "number": 42,
+        "url": "https://github.com/test/repo/pull/42",
+        "state": "OPEN",
+        "baseRefName": "main",
+        "headRefName": "feature/from-pr",
+    }
+
+    def run(command, **kwargs):
+        if command[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(command, 0, json.dumps(pr))
+        if command[:3] == ["gh", "pr", "checkout"]:
+            assert kwargs["cwd"] != checkout
+            if (
+                host.git_output(kwargs["cwd"], "branch", "--show-current")
+                == "feature/from-pr"
+            ):
+                return subprocess.CompletedProcess(command, 0)
+            return real_run(["git", "switch", "-qc", "feature/from-pr"], **kwargs)
+        if command[0] == "codex":
+            assert (
+                host.git_output(kwargs["cwd"], "branch", "--show-current")
+                == "feature/from-pr"
+            )
+            assert kwargs["env"]["CODEMATE_PR_NUMBER"] == "42"
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host.subprocess, "run", run)
+    host.run_host(args(branch=None, pr="42"))
+    assert host.git_output(checkout, "branch", "--show-current") == "main"
+    with pytest.raises(SystemExit, match="must match"):
+        host.run_host(args(branch=None, pr="42", base_branch="master", dry_run=True))
+
+
+def test_issue_selects_task_branch(checkout):
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    plan = host.plan_worktree(
+        args(branch=None, issue="99"), checkout, home, dict(os.environ)
+    )
+    assert plan.branch == "issue-99"
+
+
+def test_fork_pr_target_uses_upstream_and_fork_owner(checkout):
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github.com:fork-owner/project.git"],
+        cwd=checkout,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "remote",
+            "add",
+            "upstream",
+            "https://github.com/upstream-owner/project.git",
+        ],
+        cwd=checkout,
+        check=True,
+    )
+    assert host.github_target(checkout, "feature/host") == (
+        ["--repo", "upstream-owner/project"],
+        "fork-owner:feature/host",
+    )
 
 
 @pytest.mark.parametrize(
@@ -105,7 +310,10 @@ def test_native_config_and_environment_are_preserved(checkout, monkeypatch):
     host.run_host(args(chat=True, query="hello"))
     command, kwargs = calls[0]
     assert command[-1] == "hello"
-    assert kwargs["cwd"] == checkout
+    assert kwargs["cwd"] != checkout
+    assert host.git_output(kwargs["cwd"], "branch", "--show-current") == "feature/host"
+    assert kwargs["env"]["CODEMATE_REPO_DIR"] == str(kwargs["cwd"])
+    assert not (kwargs["cwd"] / ".env").exists()
     assert kwargs["env"]["CODEX_HOME"] == str(codex_home)
     assert kwargs["env"]["CLAUDE_CONFIG_DIR"] == os.environ["CLAUDE_CONFIG_DIR"]
     assert kwargs["env"]["CODEMATE_MODE"] == "host"
@@ -115,33 +323,50 @@ def test_native_config_and_environment_are_preserved(checkout, monkeypatch):
     assert "developer_instructions=" not in " ".join(command)
 
 
-def test_dirty_checkout_cannot_start_pr_automation(checkout, monkeypatch):
+def test_dirty_primary_checkout_is_preserved(checkout, monkeypatch):
     (checkout / "user-work.txt").write_text("keep me")
-    with pytest.raises(SystemExit, match="clean worktree"):
-        host.run_host(args())
+    real_run = subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        if command[0] == "codex":
+            calls.append(kwargs["cwd"])
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host.subprocess, "run", run)
+    host.run_host(args(no_pr=True))
     assert (checkout / "user-work.txt").read_text() == "keep me"
-    assert not (Path(os.environ["CODEX_HOME"]) / "plugins").exists()
+    assert not (calls[0] / "user-work.txt").exists()
+    assert host.git_output(checkout, "branch", "--show-current") == "main"
+    (calls[0] / "dirty.txt").write_text("unfinished")
+    with pytest.raises(SystemExit, match="clean target worktree"):
+        host.run_host(args(no_pr=True))
 
 
-def test_branch_validation_does_not_switch_branches(checkout):
-    with pytest.raises(SystemExit, match="does not switch"):
-        host.run_host(args(branch="other", dry_run=True))
-    assert host.git_output(checkout, "branch", "--show-current") == "feature/host"
+def test_branch_validation_does_not_switch_primary_branch(checkout):
+    host.run_host(args(branch="other", dry_run=True))
+    assert host.git_output(checkout, "branch", "--show-current") == "main"
+    assert not host.has_ref(checkout, "refs/heads/other")
 
 
 @pytest.mark.parametrize(
-    "state,branch", [("CLOSED", "feature/host"), ("OPEN", "different")]
+    "state,base,message",
+    [("CLOSED", "main", "open PR"), ("OPEN", "develop", "main or master")],
 )
-def test_pr_target_must_match_the_open_branch(checkout, monkeypatch, state, branch):
+def test_pr_requires_open_state_and_supported_base(
+    checkout, monkeypatch, state, base, message
+):
+    monkeypatch.setattr(host, "github_target", lambda *a: ([], ""))
     monkeypatch.setattr(
         host.subprocess,
         "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
-            command, 0, json.dumps({"state": state, "headRefName": branch})
+            command, 0, json.dumps({"state": state, "baseRefName": base})
         ),
     )
-    with pytest.raises(SystemExit, match="current branch to match"):
-        host.validate_pr(args(pr="123"), checkout, "feature/host", dict(os.environ))
+    with pytest.raises(SystemExit, match=message):
+        host.read_pr(args(branch=None, pr="123"), checkout, dict(os.environ))
 
 
 def test_explicit_no_pr_environment_reaches_the_native_agent(checkout, monkeypatch):

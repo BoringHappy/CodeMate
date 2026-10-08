@@ -81,32 +81,46 @@ codemate --setup
 
 #### Host 模式（macOS / Linux）
 
-在当前 Git checkout 中启动宿主机已安装的 agent，无需 Docker，也不需要
-运行 `codemate --setup`：
+从本地 Git checkout 启动宿主机 agent，无需 Docker 或 `codemate --setup`。
+默认 agent 为 Codex：
 
 ```bash
-codemate --host --agent codex
-codemate --host --agent claude --query "实现本次需求"
-codemate --host --agent codex --pr 123
-codemate --host --agent codex --issue 456
-codemate --host --agent codex --chat
-codemate --host --agent codex --dry-run
+codemate --host --branch feature/my-task
+codemate --host --branch feature/my-task --agent claude --query "实现本次需求"
+codemate --host --pr 123
+codemate --host --issue 456
+codemate --host --branch feature/local --no-pr
+codemate --host --branch feature/chat --chat
+codemate --host --branch feature/my-task --base-branch master --dry-run
 ```
 
 先在宿主机安装并登录所选 agent。Host 模式需要 Git、bash、jq；PR 自动化
-还需要已经认证的 GitHub CLI。沿用宿主机 agent 的登录、模型、MCP 和权限
-配置，不添加容器中的权限绕过参数。Codex 提示信任插件 hooks 时，需要
-检查并信任后才能使用 PR 监控。
+还需要已经认证的 GitHub CLI。沿用 agent 的登录、模型、MCP 和权限配置，
+不添加容器中的权限绕过参数。Codex 提示信任插件 hooks 时，需要检查并
+信任后才能使用 PR 监控。
 
-默认读取已有 PR、对完成的任务自动 commit/push，并监控 PR 反馈和 CI。
-没有 PR 时可以继续工作，按用户要求创建 PR。`--no-pr` 只做本地提交，
-不 push、不创建 PR。`--chat` 不注入工作流指令，也不运行 Stop 自动化。
-Host 模式不执行项目 setup 命令或启动服务。
+必须指定一个目标：新任务使用 `--branch`，已有 PR 使用 `--pr`，issue 使用
+`--issue`（任务分支为 `issue-NUMBER`）。Base branch 仅允许 `main` 或
+`master`，默认优先 main，其次 master；同名分支优先使用已有 upstream/origin
+引用，再使用本地分支。可用 `--base-branch` 显式选择；已有 PR 必须匹配其
+base。没有本地 base 引用时，请先 fetch 对应分支。
 
-使用当前已检出的具名分支；`--branch`、`--pr` 用于验证当前 checkout，
-不会切换分支。启用 PR 自动化时，启动前 worktree 必须干净。同一 worktree
-只能运行一个 CodeMate host 实例；并行任务请使用不同 Git worktree。
-此锁不会阻止其他编辑器或普通 agent 会话修改文件。
+CodeMate 在 `${CODEMATE_HOME:-~/.codemate}/host/worktrees/<仓库>/<分支>/`
+下创建或复用 linked Git worktree，**在该 worktree 中启动 agent**。
+原始 checkout 的分支和未提交修改保持原样。任务分支不能是 main/master，
+也不能已被主 checkout 检出。已有 linked worktree 会复用，退出后保留；
+PR 自动化要求目标 worktree 启动时干净。同一仓库、同一任务分支只允许一个
+CodeMate host 实例，不同任务分支可以并行。此锁不会阻止其他编辑器或普通
+agent 会话修改文件。
+
+启动 agent 前，CodeMate 更新已有远端 base 引用，查找任务已有 PR；没有时
+按选定 base 创建 draft PR。新 PR 在需要时先创建一个初始空提交，再 push
+到 origin，使用仓库 PR 模板和可选 `--pr-title`，并写入监控所需的 PR 状态。
+有 upstream 的 fork 仓库会向 upstream 创建 PR。初始化失败不会启动 agent；
+重试会复用 worktree 和已有 PR。
+默认注入共用的 system prompt 和 host 工作流指令，让 agent 读取 PR、完成后
+commit/push，并监控反馈和 CI。`--no-pr` 跳过启动 push/PR 创建，只做本地提交。
+`--chat` 还会跳过工作流指令和 Stop 自动化。Host 不执行项目 setup 或启动服务。
 
 插件随 CLI 安装包分发，按内容版本存放在
 `${CODEMATE_HOME:-~/.codemate}/host/plugins/`。运行状态默认在
@@ -135,8 +149,8 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 # 使用分支名称运行（自动检测仓库来源：--repo > .env > 当前目录的 git remote）
 codemate --branch feature/your-branch
 
-# 使用 Codex（默认运行 Claude）
-codemate --branch feature/your-branch --agent codex
+# 使用 Claude（默认运行 Codex）
+codemate --branch feature/your-branch --agent claude
 
 # 使用现有 PR 运行
 codemate --pr 123
@@ -390,7 +404,7 @@ Docker 会接收按上述优先级生成后的环境变量值；项目 `.env` �
 | `CODEMATE_SKIP_PULL` | 否 | 启动时跳过 Docker 镜像拉取；仅当本地缺少镜像时才拉取 |
 | `CODEMATE_HOME` | 否 | 宿主机上的 CodeMate home 目录；支持 `~` 和 `$VAR` 展开（默认：`~/.codemate`） |
 | `CODEMATE_PURE_HOME` | 否 | `--pure` 会话使用的 home 目录；支持 `~` 和 `$VAR` 展开（默认：`CODEMATE_HOME` 路径加 `-pure` 后缀，例如 `~/.codemate-pure`） |
-| `CODEMATE_AGENT` | 否 | 启动的 runtime：`claude`（默认）或 `codex` |
+| `CODEMATE_AGENT` | 否 | 启动的 runtime：`codex`（默认）或 `claude` |
 | `CODEMATE_INSTANCE_ID` | 否 | 区分同一主机或容器内并发 agent 进程的 runtime instance 名称 |
 | `CODEMATE_RUNTIME_DIR` | 否 | 覆盖 session 级 hook 状态根目录（默认 `$XDG_RUNTIME_DIR/codemate` 或 `/tmp/codemate-<uid>`） |
 | `CODEMATE_TMPDIR` | 否 | 写入容器 env 的每个 agent 专属临时目录（Claude 为 `/home/agent/.claude/tmp`，Codex 为 `/home/agent/.codex/tmp`）；未设置 `CODEMATE_RUNTIME_DIR` 时 hook 会由此派生 runtime root |

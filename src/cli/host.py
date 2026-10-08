@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ import tempfile
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -217,21 +219,56 @@ def validate_options(args: SimpleNamespace) -> None:
             + ", ".join(selected)
             + "."
         )
-    if sum(bool(getattr(args, key, None)) for key in ("branch", "pr", "issue")) > 1:
+    targets = sum(bool(getattr(args, key, None)) for key in ("branch", "pr", "issue"))
+    if targets > 1:
         raise SystemExit("Specify only one target: --branch, --pr, or --issue.")
+    if not targets and not getattr(args, "update", False):
+        raise SystemExit(
+            "Specify --branch for a new task, or --pr / --issue for an existing target."
+        )
     for key in ("pr", "issue"):
         target = getattr(args, key, None)
         if target and (not str(target).isdigit() or int(target) < 1):
             raise SystemExit(f"--{key} expects a positive number.")
 
 
-def validate_pr(
-    args: SimpleNamespace, cwd: Path, branch: str, env: dict[str, str]
-) -> None:
-    if not getattr(args, "pr", None):
-        return
+def github_target(cwd: Path, branch: str = "") -> tuple[list[str], str]:
+    """Use upstream as the PR repository when this checkout is a fork."""
     result = subprocess.run(
-        ["gh", "pr", "view", str(args.pr), "--json", "number,url,state,headRefName"],
+        ["git", "-C", str(cwd), "remote", "get-url", "upstream"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        return [], branch
+
+    def github_repo(url: str) -> str:
+        match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
+        if not match:
+            raise SystemExit(
+                "Host fork workflow requires GitHub origin/upstream remotes."
+            )
+        return match[1]
+
+    repository = github_repo(result.stdout.strip())
+    owner = github_repo(git_output(cwd, "remote", "get-url", "origin")).split("/")[0]
+    return ["--repo", repository], f"{owner}:{branch}" if branch else ""
+
+
+def read_pr(args: SimpleNamespace, cwd: Path, env: dict[str, str]) -> dict:
+    if not getattr(args, "pr", None):
+        return {}
+    result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "view",
+            str(args.pr),
+            *github_target(cwd)[0],
+            "--json",
+            "number,url,state,headRefName,headRefOid,baseRefName",
+        ],
         cwd=cwd,
         env=env,
         text=True,
@@ -243,10 +280,361 @@ def validate_pr(
             "Cannot read the requested PR with the host's gh authentication."
         )
     data = json.loads(result.stdout)
-    if data["state"] != "OPEN" or data["headRefName"] != branch:
+    if data["state"] != "OPEN":
+        raise SystemExit("--host --pr requires an open PR.")
+    if data["baseRefName"] not in {"main", "master"}:
+        raise SystemExit("The PR base branch must be main or master.")
+    return data
+
+
+def has_ref(cwd: Path, ref: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--verify", f"{ref}^{{commit}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def base_reference(cwd: Path, requested: str | None) -> tuple[str, str]:
+    if requested and requested not in {"main", "master"}:
+        raise SystemExit("--base-branch must be main or master.")
+    for name in [requested] if requested else ["main", "master"]:
+        for ref in (
+            f"refs/remotes/upstream/{name}",
+            f"refs/remotes/origin/{name}",
+            f"refs/heads/{name}",
+        ):
+            if has_ref(cwd, ref):
+                return name, ref
+    raise SystemExit(
+        "No main/master base branch is available. Fetch or create main/master before using --host."
+    )
+
+
+def registered_worktrees(cwd: Path) -> dict[str, Path]:
+    worktrees = {}
+    record = {}
+    for field in git_output(cwd, "worktree", "list", "--porcelain", "-z").split("\0"):
+        if not field:
+            if "branch" in record and "worktree" in record:
+                worktrees[record["branch"].removeprefix("refs/heads/")] = Path(
+                    record["worktree"]
+                ).resolve()
+            record = {}
+        else:
+            key, _, value = field.partition(" ")
+            record[key] = value
+    return worktrees
+
+
+@dataclass(frozen=True)
+class WorktreePlan:
+    repository: Path
+    common_dir: Path
+    branch: str
+    base_branch: str
+    base_ref: str
+    path: Path
+    pr_number: str = ""
+
+    @property
+    def repository_key(self) -> str:
+        return hashlib.sha256(str(self.common_dir).encode()).hexdigest()[:16]
+
+    @property
+    def branch_key(self) -> str:
+        return hashlib.sha256(self.branch.encode()).hexdigest()[:16]
+
+
+def plan_worktree(
+    args: SimpleNamespace, cwd: Path, home: Path, env: dict[str, str]
+) -> WorktreePlan:
+    repository = Path(git_output(cwd, "rev-parse", "--show-toplevel"))
+    common_dir = (
+        repository / git_output(repository, "rev-parse", "--git-common-dir")
+    ).resolve()
+    pr = read_pr(args, repository, env)
+    requested = getattr(args, "base_branch", None)
+    if pr and requested and requested != pr["baseRefName"]:
+        raise SystemExit("--base-branch must match the PR's base branch.")
+    base_branch, base_ref = base_reference(
+        repository, pr.get("baseRefName") or requested
+    )
+    branch = (
+        pr.get("headRefName") or getattr(args, "branch", None) or f"issue-{args.issue}"
+    )
+    if branch in {"main", "master"}:
         raise SystemExit(
-            "--host --pr requires the current branch to match the open PR. Check out its branch in a separate worktree first."
+            "The task branch cannot be main or master; choose a feature branch."
         )
+    valid = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        capture_output=True,
+        check=False,
+    )
+    if valid.returncode or branch.startswith("-") or "@{" in branch:
+        raise SystemExit(f"Invalid task branch: {branch}")
+    repository_key = hashlib.sha256(str(common_dir).encode()).hexdigest()[:16]
+    branch_key = hashlib.sha256(branch.encode()).hexdigest()[:16]
+    slug = re.sub(r"[^A-Za-z0-9._-]", "-", branch)[:40]
+    path = home / "worktrees" / repository_key / f"{slug}-{branch_key}"
+    path = registered_worktrees(repository).get(branch, path)
+    return WorktreePlan(
+        repository,
+        common_dir,
+        branch,
+        base_branch,
+        base_ref,
+        path,
+        str(getattr(args, "pr", None) or ""),
+    )
+
+
+def prepare_worktree(plan: WorktreePlan, home: Path, env: dict[str, str]) -> Path:
+    # Serialize repository metadata changes, while task sessions on distinct
+    # branches retain independent locks and can run concurrently.
+    with locked(home / "locks" / f"{plan.repository_key}.repository.lock", wait=True):
+        if not env.get("CODEMATE_NO_PR") and plan.base_ref.startswith("refs/remotes/"):
+            remote = plan.base_ref.split("/")[2]
+            subprocess.run(
+                [
+                    "git",
+                    "fetch",
+                    remote,
+                    f"{plan.base_branch}:refs/remotes/{remote}/{plan.base_branch}",
+                ],
+                cwd=plan.repository,
+                env=env,
+                check=True,
+            )
+        existing = registered_worktrees(plan.repository).get(plan.branch)
+        if existing:
+            if not existing.is_dir():
+                raise SystemExit(
+                    f"The worktree registered for {plan.branch} is missing: {existing}. Repair/prune it first."
+                )
+            if (
+                Path(git_output(existing, "rev-parse", "--absolute-git-dir"))
+                == plan.common_dir
+            ):
+                raise SystemExit(
+                    f"Branch {plan.branch} is checked out in the primary checkout. Switch that checkout to main/master before starting its host worktree."
+                )
+            return existing
+        if plan.path.exists():
+            raise SystemExit(
+                f"Worktree destination already exists but is not registered: {plan.path}"
+            )
+        plan.path.parent.mkdir(parents=True, exist_ok=True)
+        command = ["git", "-C", str(plan.repository), "worktree", "add"]
+        if has_ref(plan.repository, f"refs/heads/{plan.branch}"):
+            command += [str(plan.path), plan.branch]
+        elif plan.pr_number:
+            # gh handles GitHub fork/head remotes without cloning a repository
+            # or switching the user's primary checkout.
+            command += ["--detach", str(plan.path), plan.base_ref]
+        elif has_ref(plan.repository, f"refs/remotes/origin/{plan.branch}"):
+            command += [
+                "--track",
+                "-b",
+                plan.branch,
+                str(plan.path),
+                f"refs/remotes/origin/{plan.branch}",
+            ]
+        else:
+            command += ["--no-track", "-b", plan.branch, str(plan.path), plan.base_ref]
+        subprocess.run(command, env=env, check=True)
+        if (
+            plan.pr_number
+            and git_output(plan.path, "branch", "--show-current") != plan.branch
+        ):
+            subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "checkout",
+                    plan.pr_number,
+                    *github_target(plan.path)[0],
+                    "--branch",
+                    plan.branch,
+                ],
+                cwd=plan.path,
+                env=env,
+                check=True,
+            )
+        return plan.path
+
+
+def prepare_pr(
+    plan: WorktreePlan, cwd: Path, args: SimpleNamespace, env: dict[str, str]
+) -> dict:
+    """Complete setup-pr before handing the worktree to the native agent."""
+    repo_flags, head = github_target(cwd, plan.branch)
+    if plan.pr_number:
+        pr = read_pr(args, cwd, env)
+    else:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                *repo_flags,
+                "--head",
+                head,
+                "--state",
+                "open",
+                "--json",
+                "number,url,baseRefName",
+            ],
+            cwd=cwd,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        candidates = json.loads(result.stdout)
+        matches = [pr for pr in candidates if pr["baseRefName"] == plan.base_branch]
+        if candidates and not matches:
+            raise SystemExit(f"The existing PR base must match {plan.base_branch}.")
+        if len(matches) > 1:
+            raise SystemExit(
+                "Multiple open PRs match this branch; select one with --pr."
+            )
+        pr = matches[0] if matches else {}
+    if pr:
+        # Resolve the real PR head even in a single-branch/stale local clone.
+        # gh updates with fast-forward semantics; local divergent work is
+        # preserved and prevents startup rather than being reset.
+        subprocess.run(
+            [
+                "gh",
+                "pr",
+                "checkout",
+                str(pr["number"]),
+                *repo_flags,
+                "--branch",
+                plan.branch,
+            ],
+            cwd=cwd,
+            env=env,
+            check=True,
+        )
+    if not pr:
+        # GitHub needs a commit beyond the base even when the task has not
+        # started. Retrying after a failed push/create reuses this commit.
+        if git_output(cwd, "rev-list", "--count", f"{plan.base_ref}..HEAD") == "0":
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    f"Initial commit for {plan.branch}",
+                ],
+                cwd=cwd,
+                env=env,
+                check=True,
+            )
+        subprocess.run(
+            ["git", "push", "-u", "origin", plan.branch], cwd=cwd, env=env, check=True
+        )
+        template = next(
+            (
+                path
+                for path in (
+                    cwd / ".github/PULL_REQUEST_TEMPLATE.md",
+                    cwd / ".github/pull_request_template.md",
+                    cwd / "pull_request_template.md",
+                )
+                if path.is_file()
+            ),
+            None,
+        )
+        body = (
+            template.read_text()
+            if template
+            else "## Summary\n\nWork in progress.\n\n## Testing\n\nPending.\n"
+        )
+        title = getattr(args, "pr_title", None) or plan.branch.replace("-", " ")
+        with tempfile.TemporaryDirectory(prefix="codemate-pr-") as temporary:
+            body_file = Path(temporary) / "body.md"
+            body_file.write_text(body)
+            created = subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "create",
+                    *repo_flags,
+                    "--draft",
+                    "--head",
+                    head,
+                    "--base",
+                    plan.base_branch,
+                    "--title",
+                    title,
+                    "--body-file",
+                    str(body_file),
+                ],
+                cwd=cwd,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+        url = created.stdout.strip().splitlines()[-1]
+        number = url.rstrip("/").rsplit("/", 1)[-1]
+        if not number.isdigit():
+            raise SystemExit(f"Cannot identify the newly created PR: {url}")
+        pr = {"number": int(number), "url": url, "baseRefName": plan.base_branch}
+    subprocess.run(
+        [
+            "bash",
+            str(Path(env["CODEMATE_PR_PLUGIN_ROOT"]) / "scripts/pr-status.sh"),
+            "set",
+            "--number",
+            str(pr["number"]),
+            "--url",
+            pr["url"],
+            "--branch",
+            plan.branch,
+        ],
+        cwd=cwd,
+        env=env,
+        check=True,
+    )
+    env["CODEMATE_PR_NUMBER"] = str(pr["number"])
+    print(f"PR: {pr['url']}")
+    return pr
+
+
+def workflow_prompt(
+    plan: WorktreePlan, args: SimpleNamespace, pr: dict | None = None
+) -> str:
+    standard = Path(__file__).parent / "resources/system_prompt.txt"
+    if not standard.is_file():
+        standard = (
+            Path(__file__).resolve().parents[2]
+            / "docker/setup/prompt/system_prompt.txt"
+        )
+    prompt = (
+        standard.read_text()
+        + "\n\n"
+        + (Path(__file__).parent / "host_prompt.txt").read_text()
+    )
+    prompt += f"\nTask branch: {plan.branch}. Base branch: {plan.base_branch}.\n"
+    if pr:
+        prompt += f"\nCodeMate prepared PR #{pr['number']}: {pr['url']}. Read it with pr:get-details before starting.\n"
+    elif plan.pr_number:
+        prompt += (
+            f"\nThe selected PR is #{plan.pr_number}; read it with pr:get-details.\n"
+        )
+    if getattr(args, "issue", None):
+        prompt += f"\nRead issue #{args.issue} with issue:read-issue, then work on the prepared task branch.\n"
+    return prompt
 
 
 def run_host(args: SimpleNamespace) -> None:
@@ -257,7 +645,7 @@ def run_host(args: SimpleNamespace) -> None:
         print("Installed with uv tool. Update with: uv tool upgrade codemate-cli")
         return
     env = host_environment(args)
-    agent = getattr(args, "agent", None) or env.get("CODEMATE_AGENT") or "claude"
+    agent = getattr(args, "agent", None) or env.get("CODEMATE_AGENT") or "codex"
     if agent not in {"codex", "claude"}:
         raise SystemExit(f"Invalid host agent: {agent}. Expected: claude or codex")
     dry_run = getattr(args, "dry_run", False)
@@ -277,18 +665,10 @@ def run_host(args: SimpleNamespace) -> None:
         ]
         if missing:
             raise SystemExit("Host prerequisites missing: " + ", ".join(missing))
-    cwd = Path.cwd().resolve()
-    git_dir = git_output(cwd, "rev-parse", "--absolute-git-dir")
-    branch = git_output(cwd, "branch", "--show-current")
-    if not branch:
-        raise SystemExit("--host requires a named branch; check out a branch first.")
-    if getattr(args, "branch", None) and args.branch != branch:
-        raise SystemExit(
-            f"Current branch is {branch}; --host does not switch to {args.branch}."
-        )
+    home = codemate_home().resolve() / "host"
+    plan = plan_worktree(args, Path.cwd().resolve(), home, env)
     source = resources()
     identity = bundle_id(source)
-    home = codemate_home().resolve() / "host"
     bundle = home / "plugins" / identity
     marketplace = f"codemate-host-{identity}"
     codex_home = (
@@ -313,15 +693,15 @@ def run_host(args: SimpleNamespace) -> None:
             "CODEMATE_PR_PLUGIN_ROOT": str(bundle / "pr"),
             "CODEMATE_NO_PR": "true" if no_pr else "",
             "CODEMATE_CHAT": "true" if chat else "",
+            "CODEMATE_BASE_BRANCH": plan.base_branch,
+            "CODEMATE_BRANCH_NAME": plan.branch,
+            "CODEMATE_PR_NUMBER": plan.pr_number,
+            "CODEMATE_ISSUE_NUMBER": str(getattr(args, "issue", None) or ""),
         }
     )
     if getattr(args, "co_author_by", None):
         env["CODEMATE_CO_AUTHOR_BY"] = args.co_author_by
-    prompt = (Path(__file__).parent / "host_prompt.txt").read_text()
-    if getattr(args, "pr", None):
-        prompt += f"\nThe selected PR is #{args.pr}; read it with pr:get-details.\n"
-    if getattr(args, "issue", None):
-        prompt += f"\nStart by reading issue #{args.issue} with issue:read-issue. Work on the current branch.\n"
+    prompt = workflow_prompt(plan, args)
     command = native_command(
         agent,
         bundle,
@@ -330,15 +710,18 @@ def run_host(args: SimpleNamespace) -> None:
         getattr(args, "query", None) or "",
         chat=chat,
     )
-    print(f"CodeMate Host: {agent} · {cwd} · {branch}")
+    print(f"CodeMate Host: {agent} · {plan.branch} · base {plan.base_branch}")
     if show_config:
         print(
             json.dumps(
                 {
                     "mode": "host",
                     "agent": agent,
-                    "workspace": str(cwd),
-                    "branch": branch,
+                    "repository": str(plan.repository),
+                    "workspace": str(plan.path),
+                    "branch": plan.branch,
+                    "base_branch": plan.base_branch,
+                    "base_ref": plan.base_ref,
                     "plugins": list(HOST_PLUGINS),
                     "bundle": str(bundle),
                     "runtime": str(runtime),
@@ -350,16 +733,28 @@ def run_host(args: SimpleNamespace) -> None:
         )
         return
     if dry_run:
+        print(f"Worktree: {plan.path} (create/reuse; base {plan.base_ref})")
         print(shlex.join(command))
         return
-    key = hashlib.sha256(git_dir.encode()).hexdigest()
-    with locked(home / "locks" / f"{key}.lock"):
+    with locked(home / "locks" / f"{plan.repository_key}-{plan.branch_key}.lock"):
+        cwd = prepare_worktree(plan, home, env)
+        print(f"Worktree: {cwd}")
+        env["CODEMATE_REPO_DIR"] = str(cwd)
         if not chat and git_output(cwd, "status", "--porcelain"):
             raise SystemExit(
-                "PR automation requires a clean worktree at launch. Commit/stash existing changes, use a separate worktree, or use --chat."
+                "PR automation requires a clean target worktree. Commit/stash its existing changes or use --chat."
             )
-        if not chat:
-            validate_pr(args, cwd, branch, env)
         prepare_plugins(source, bundle, codex_home, agent, marketplace)
         runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not no_pr:
+            pr = prepare_pr(plan, cwd, args, env)
+            command = native_command(
+                agent,
+                bundle,
+                marketplace,
+                workflow_prompt(plan, args, pr),
+                getattr(args, "query", None) or "",
+                chat=chat,
+            )
         subprocess.run(command, cwd=cwd, env=env, check=True)
+        print(f"Worktree retained: {cwd}")

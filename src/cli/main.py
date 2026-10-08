@@ -162,7 +162,7 @@ FIELDS: Tuple[Field, ...] = (
     Field("CODEMATE_QUERY", "query"),
     Field("CODEMATE_NO_PR", "no_pr"),
     Field("CODEMATE_CHAT", "chat"),
-    Field("CODEMATE_AGENT", "agent", default="claude"),
+    Field("CODEMATE_AGENT", "agent", default="codex"),
     Field("CODEMATE_GITHUB_TOKEN", derived=gh_token, secret=True),
     Field("CODEMATE_GIT_USER_NAME", derived=git_user_name),
     Field("CODEMATE_GIT_USER_EMAIL", derived=git_user_email),
@@ -521,8 +521,8 @@ def create_setup_files(cwd: Path) -> None:
             "# CodeMate Environment Configuration\n\n"
             "# Optional: Default repository URL\n"
             "# CODEMATE_GIT_REPO_URL=\n\n"
-            "# Runtime agent: claude (default) or codex\n"
-            "# CODEMATE_AGENT=claude\n\n"
+            "# Runtime agent: codex (default) or claude\n"
+            "# CODEMATE_AGENT=codex\n\n"
             "# Optional commit co-author used by the git commit skill\n"
             "# CODEMATE_CO_AUTHOR_BY=Name <email@example.com>\n\n"
             "# Optional chat mode: skips PR creation and CodeMate system prompt injection\n"
@@ -810,6 +810,8 @@ def run_codemate(args: SimpleNamespace) -> None:
 
         run_host(args)
         return
+    if getattr(args, "base_branch", None):
+        raise SystemExit("--base-branch requires --host.")
     cwd = Path.cwd()
     if args.setup:
         create_setup_files(cwd)
@@ -877,12 +879,13 @@ def cli(
     setup: bool = typer.Option(False, "--setup", help="Create configuration files."),
     update: bool = typer.Option(False, "--update", help="Show update instructions."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Branch name to work on."),
+    base_branch: Optional[str] = typer.Option(None, "--base-branch", help="Host worktree base branch: main or master (auto-detected by default)."),
     pr: Optional[str] = typer.Option(None, "--pr", help="Existing PR number to work on."),
     pr_title: Optional[str] = typer.Option(None, "--pr-title", help="PR title."),
     issue: Optional[str] = typer.Option(None, "--issue", help="GitHub issue number to work on."),
     query: Optional[str] = typer.Option(None, "--query", help="Initial query to send to the selected agent."),
-    agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent."),
-    host: bool = typer.Option(False, "--host", help="Launch the locally installed agent in the current worktree without Docker or setup."),
+    agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent. Default: codex."),
+    host: bool = typer.Option(False, "--host", help="Launch the local agent in a Git worktree based on main/master, without Docker or setup."),
     co_author_by: Optional[str] = typer.Option(None, "--co-author-by", help="Commit co-author, e.g. 'Name <email@example.com>'."),
     no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push; host mode commits locally."),
     chat: bool = typer.Option(False, "--chat", help="Run in chat mode: skip PR creation and CodeMate system prompt injection."),
@@ -940,6 +943,7 @@ def cli(
         setup=setup,
         update=update,
         branch=branch,
+        base_branch=base_branch,
         pr=pr,
         pr_title=pr_title,
         issue=issue,
