@@ -77,7 +77,7 @@ save_monitor_state() {
 acquire_branch_monitor() {
     exec 8>"$BRANCH_MONITOR_LOCK_FILE"
     while session_can_poll; do
-        flock -n 8 && return 0
+        codemate_flock -n 8 && return 0
         sleep 1
     done
     return 1
@@ -159,7 +159,7 @@ check_ci_status() {
             (if (.detailsUrl // .targetUrl // "") == "" then "" else "\n  \(.detailsUrl // .targetUrl)" end)) |
         join("\n") | .[0:4000]
     ')
-    signature=$(printf '%s' "$failed_json" | sha256sum | awk '{print $1}')
+    signature=$(printf '%s' "$failed_json" | codemate_sha256 | awk '{print $1}')
 
     run_json=""
     if [ -n "$head_oid" ]; then

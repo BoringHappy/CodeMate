@@ -2,7 +2,7 @@
 set -e
 
 SETUP_DIR="$(dirname "$0")"
-CODEMATE_AGENT="${CODEMATE_AGENT:-claude}"
+CODEMATE_AGENT="${CODEMATE_AGENT:-codex}"
 export CODEMATE_AGENT
 
 case "$CODEMATE_AGENT" in

@@ -2,7 +2,7 @@
 
 English | [简体中文](README_CN.md)
 
-Docker-based Claude Code and Codex environment with automated Git/PR setup.
+Claude Code and Codex workflows in Docker or directly on your host, with Git/PR automation.
 
 > **⚠️ Security Notice:** This container runs the selected agent without approval prompts. Use only in isolated environments with trusted repositories.
 
@@ -81,6 +81,80 @@ The `codemate` command is provided by the Python CLI package in `src/`.
 
 ### Usage
 
+#### Host mode (macOS / Linux)
+
+Run the installed host agent from a local Git checkout, without Docker or
+`codemate --setup`. Codex is the default agent:
+
+```bash
+codemate --host --branch feature/my-task
+codemate --host --branch feature/my-task --agent claude --query "Implement the requested change"
+codemate --host --pr 123
+codemate --host --issue 456
+codemate --host --branch feature/local --no-pr
+codemate --host --branch feature/chat --chat
+codemate --host --branch feature/my-task --base-branch master --dry-run
+```
+
+Install and sign in to the selected agent locally first. Host mode requires
+Git, bash, jq, and (for PR automation) an authenticated GitHub CLI. It retains
+native agent credentials and model/MCP configuration. Codex launches with
+`--yolo --no-daemon --no-alt-screen`, bypassing approval prompts and sandboxing;
+Claude retains its native permission settings. Review and trust
+the host plugin hooks when Codex asks before relying on PR monitoring.
+
+Specify exactly one target: `--branch` for a new task, `--pr` for an open PR,
+or `--issue` to use `issue-NUMBER`. The base must be `main` or `master`;
+CodeMate prefers `main`, then `master`, using available upstream/origin refs
+before local branches. `--base-branch` selects either explicitly; for an
+existing PR it must match that PR's base. Fetch your base branch first if no
+local ref is available.
+
+CodeMate creates or reuses a linked Git worktree under
+`${CODEMATE_HOME:-~/.codemate}/host/worktrees/<repository>/<branch>/`, then
+launches the agent **in that worktree**. The original checkout and its uncommitted
+changes remain intact. The task branch cannot be main/master or be checked out
+in the primary checkout. Existing linked worktrees are reused and retained on
+exit; PR automation requires the target worktree to be clean at launch.
+A lock under the shared Git directory (`codemate-host-locks/`) prevents concurrent
+CodeMate sessions on the same repository/branch, including sessions with different
+`CODEMATE_HOME` values. The agent inherits the lock so it remains protected if
+its launcher is killed. Different task branches can run concurrently. Locks do not prevent other
+editors or plain agent sessions from changing your files.
+
+Before launching the agent, CodeMate refreshes an available remote base ref,
+finds an existing open PR for the task, or creates a draft PR against the chosen
+base. For a new PR it adds an initial empty commit if needed, pushes to origin,
+uses the repository PR template and optional `--pr-title`, and records the PR
+for monitoring. Forks with an upstream remote create the PR in upstream.
+A failed setup stops before agent launch; retries reuse the worktree and PR.
+Failed PR checkouts can resume in the registered detached worktree if it has
+no uncommitted changes or commits beyond the base. Otherwise startup asks you
+to preserve that work first. GitHub CLI failures include the underlying error.
+The shared default system prompt plus host workflow instructions tell the agent
+to read PR context, commit/push completed changes, and monitor feedback and CI.
+`--no-pr` skips startup push/PR creation and commits locally. `--chat` also skips
+workflow prompt injection and Stop automation. No project setup commands or
+services are run.
+
+Plugin resources ship in the CLI package. CodeMate publishes immutable bundles
+under `${CODEMATE_HOME:-~/.codemate}/host/plugins/` and shares worktree-scoped
+runtime state under `host/runtime/` (or `CODEMATE_RUNTIME_DIR`). Each launch has
+a unique instance ID. Codex receives a private marketplace and plugin enablement
+through process arguments; Claude receives session-only `--plugin-dir` paths.
+CodeMate does not register or enable these plugins in global agent config, so
+ordinary `codex`/`claude` launches do not load this host bundle. Previously
+installed, globally enabled CodeMate plugins remain an explicit user setting:
+disable those separately if you want ordinary launches to omit them. Host
+launches disable the legacy `@codemate` plugins for their own session to avoid
+duplicate hooks.
+
+Container `.env` and setup configuration are not automatically imported.
+The host process inherits your environment; use `--env KEY=VALUE` or
+`--env-file path` for explicit additions. Container flags such as `--mount`,
+`--repo`, `--build`, `--shell`, and `--pure` cannot be combined with `--host`.
+`--dry-run` and `--config` do not install plugins or write launch state.
+
 #### Basic Commands
 
 ```bash
@@ -93,8 +167,8 @@ codemate --repo https://github.com/your-org/your-repo.git --branch feature/xyz
 # Run with branch name (auto-detects repo from: --repo > .env > current directory's git remote)
 codemate --branch feature/your-branch
 
-# Run Codex instead of the default Claude runtime
-codemate --branch feature/your-branch --agent codex
+# Run Claude instead of the default Codex runtime
+codemate --branch feature/your-branch --agent claude
 
 # Run with a custom PR title
 codemate --branch feature/your-branch --pr-title "My feature title"
@@ -318,7 +392,7 @@ Docker receives generated environment values from that resolved configuration; t
 | `CODEMATE_SKIP_PULL` | No | Skip pulling the Docker image at startup; the image is only pulled if it is missing locally |
 | `CODEMATE_HOME` | No | CodeMate home directory on the host; supports `~` and `$VAR` expansion (default: `~/.codemate`) |
 | `CODEMATE_PURE_HOME` | No | Home directory used by `--pure` sessions; supports `~` and `$VAR` expansion (default: the `CODEMATE_HOME` path with a `-pure` suffix, e.g. `~/.codemate-pure`) |
-| `CODEMATE_AGENT` | No | Runtime to launch: `claude` (default) or `codex` |
+| `CODEMATE_AGENT` | No | Runtime to launch: `codex` (default) or `claude` |
 | `CODEMATE_INSTANCE_ID` | No | Runtime instance namespace used to distinguish concurrent agent processes |
 | `CODEMATE_RUNTIME_DIR` | No | Override the root for session-scoped hook state (defaults to `$XDG_RUNTIME_DIR/codemate` or `/tmp/codemate-<uid>`) |
 | `CODEMATE_TMPDIR` | No | Per-agent temp root written into the container env (`/home/agent/.claude/tmp` for Claude, `/home/agent/.codex/tmp` for Codex); hooks derive their runtime root from it when `CODEMATE_RUNTIME_DIR` is unset |

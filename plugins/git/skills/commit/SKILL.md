@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Stages all changes, creates a commit with a meaningful message, and pushes to the remote. Use when the user wants to commit and push their work.
+description: Stages task changes, creates a commit with a meaningful message, and pushes to the remote. Use when the user wants to commit and push their work.
 ---
 
 # Git Commit and Push
@@ -27,7 +27,10 @@ Commit co-author trailer:
 ## Instructions
 
 1. Review the changes shown above
-2. Stage all changes using `git add -A`
+2. When `CODEMATE_MODE=host`, review the diff and stage only this task's files
+   or hunks with `git add -- <paths>` or `git add -p`. Preserve unrelated user
+   changes, including changes already staged before this task. In container
+   workflows, stage all changes using `git add -A`.
 3. Create a commit with a clear, descriptive message that:
    - Uses imperative mood (e.g., "Add feature" not "Added feature")
    - Is concise but descriptive
@@ -35,7 +38,8 @@ Commit co-author trailer:
 4. If the commit co-author trailer shown above is not empty, append it to the commit message body after a blank line
    - Example when `CODEMATE_CO_AUTHOR_BY="Name <email@example.com>"`: `git commit -m "Add feature" -m "Co-authored-by: $CODEMATE_CO_AUTHOR_BY"`
    - If `CODEMATE_CO_AUTHOR_BY` does not start with `Co-authored-by:`, prepend `Co-authored-by: ` before committing
-5. Push to the remote using `git push`
+5. Push to the remote using `git push`. In a host session with
+   `CODEMATE_NO_PR=true`, finish after the local commit without pushing.
 
 If the branch has no upstream, use:
 ```bash

@@ -67,7 +67,11 @@ codemate_worktree_key() {
     local git_dir branch
     git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 1
     branch=$(codemate_current_branch) || return 1
-    printf '%s\n%s' "$git_dir" "$branch" | sha256sum | awk '{print $1}'
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s\n%s' "$git_dir" "$branch" | sha256sum | awk '{print $1}'
+    else
+        printf '%s\n%s' "$git_dir" "$branch" | shasum -a 256 | awk '{print $1}'
+    fi
 }
 
 codemate_cache_file() {

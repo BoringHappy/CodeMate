@@ -12,7 +12,7 @@
       "name": "git",
       "source": "./plugins/git",
       "description": "Git workflow management tools for staging, committing, and pushing changes",
-      "version": "1.0.0",
+      "version": "1.0.6",
       "category": "git",
       "keywords": ["git", "commit", "push", "workflow"]
     },
@@ -20,7 +20,7 @@
       "name": "pr",
       "source": "./plugins/pr",
       "description": "GitHub Pull Request workflow management with skills for creating, updating, and managing PRs",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "category": "github",
       "keywords": ["github", "pull-request", "pr", "review"]
     },
@@ -44,7 +44,7 @@
       "name": "workspace",
       "source": "./plugins/workspace",
       "description": "Project service configuration, workspace lifecycle hooks, Slack notifications, and repo setup utilities",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "category": "codemate",
       "keywords": ["workspace", "hooks", "slack", "notifications", "lifecycle", "setup"]
     },
