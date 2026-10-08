@@ -94,7 +94,19 @@ codemate --host --issue 456
 codemate --host --branch feature/local --no-pr
 codemate --host --branch feature/chat --chat
 codemate --host --branch feature/my-task --base-branch master --dry-run
+codemate --xcode --branch feature/ios-task
+codemate --xcode --pr 123
 ```
+
+On macOS, `--xcode` implies `--host` and opens the prepared worktree's Xcode
+project before launching the agent. It also works with an explicit `--host`,
+`--issue`, `--no-pr`, or `--chat`. CodeMate selects a directory ending in
+`.xcworkspace` at the worktree root, falling back to `.xcodeproj` only when no
+workspace exists. If none or multiple candidates of the preferred type exist,
+startup stops with an error (listing ambiguous paths). The worktree is retained
+for retry. `--dry-run` previews the opening step; `--config` reports the option;
+neither opens Xcode. On other platforms, `--xcode` is ignored and the usual
+host/container workflow runs.
 
 Install and sign in to the selected agent locally first. Host mode requires
 Git, bash, jq, and (for PR automation) an authenticated GitHub CLI. It retains
@@ -122,9 +134,14 @@ CodeMate sessions on the same repository/branch, including sessions with differe
 its launcher is killed. Different task branches can run concurrently. Locks do not prevent other
 editors or plain agent sessions from changing your files.
 
-Before launching the agent, CodeMate refreshes an available remote base ref,
-finds an existing open PR for the task, or creates a draft PR against the chosen
-base. For a new PR it adds an initial empty commit if needed, pushes to origin,
+Before creating or reusing the worktree, CodeMate fetches the latest selected
+`main`/`master` from upstream/origin, including with `--no-pr` and `--chat`.
+New task branches start from that updated remote base; the original checkout
+and existing task branches are preserved. A failed fetch stops startup before
+checkout. Repositories without either remote use the local base branch.
+Before launching the agent, CodeMate finds an existing open PR for the task,
+or creates a draft PR against the chosen base. For a new PR it adds an initial
+empty commit if needed, pushes to origin,
 uses the repository PR template and optional `--pr-title`, and records the PR
 for monitoring. Forks with an upstream remote create the PR in upstream.
 A failed setup stops before agent launch; retries reuse the worktree and PR.

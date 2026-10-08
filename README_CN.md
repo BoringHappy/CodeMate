@@ -92,7 +92,17 @@ codemate --host --issue 456
 codemate --host --branch feature/local --no-pr
 codemate --host --branch feature/chat --chat
 codemate --host --branch feature/my-task --base-branch master --dry-run
+codemate --xcode --branch feature/ios-task
+codemate --xcode --pr 123
 ```
+
+在 macOS 上，`--xcode` 自动启用 `--host`，在 worktree 准备完成后、启动 agent
+前打开其中的 Xcode 工程。也可以显式搭配 `--host`，支持 `--issue`、`--no-pr`
+和 `--chat`。优先选择 worktree 根目录下的 `.xcworkspace` 目录，没有时再找
+`.xcodeproj`。没有工程或优先类型有多个候选时会报错停止（列出冲突路径），
+worktree 保留供重试。`--dry-run` 预览打开步骤，`--config` 显示该选项，
+两者都不会启动 Xcode。非 macOS 平台直接忽略 `--xcode`，继续原来的
+host/容器流程。
 
 先在宿主机安装并登录所选 agent。Host 模式需要 Git、bash、jq；PR 自动化
 还需要已经认证的 GitHub CLI。沿用 agent 的登录、模型和 MCP 配置；
@@ -116,7 +126,11 @@ Git 目录的 `codemate-host-locks/` 下，由 agent 继承；即使启动器被
 agent 仍持有锁。不同任务分支可以并行。此锁不会阻止其他编辑器或普通
 agent 会话修改文件。
 
-启动 agent 前，CodeMate 更新已有远端 base 引用，查找任务已有 PR；没有时
+创建或复用 worktree 前，CodeMate 会先从 upstream/origin 拉取最新的
+`main`/`master`，`--no-pr` 和 `--chat` 同样执行。新任务分支从更新后的
+远端基线检出，原始 checkout 和已有任务分支保持原样。拉取失败会在
+checkout 前停止；没有这两个远端的仓库使用本地基线。
+启动 agent 前，CodeMate 查找任务已有 PR；没有时
 按选定 base 创建 draft PR。新 PR 在需要时先创建一个初始空提交，再 push
 到 origin，使用仓库 PR 模板和可选 `--pr-title`，并写入监控所需的 PR 状态。
 有 upstream 的 fork 仓库会向 upstream 创建 PR。初始化失败不会启动 agent；
