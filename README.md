@@ -657,6 +657,12 @@ codemate --branch issue-456 --query "Please use /issue:read-issue skill to read 
 
 ## PR Comment Monitoring
 
+Host sessions (`codemate --host`) check PR feedback once per Stop for both
+Codex and Claude, without backoff or retries. If another session holds the
+branch monitor lock, the check is skipped. Feedback found during the check
+still triggers a continuation; later feedback is checked at the next Stop.
+The polling behavior below applies to container sessions.
+
 CodeMate monitors PR feedback from the workspace plugin's native `Stop` hook. The first check runs immediately; later checks back off to 10, 30, 60, and then at most 120 seconds, up to 30 checks per invocation. No cron daemon or tmux prompt injection is used. Claude runs the poller as an `asyncRewake` hook so the UI remains interactive; Codex uses its synchronous Stop continuation contract to start a native agent turn when feedback arrives.
 
 Codex keeps monitoring through this polling window instead of yielding after five seconds. `CODEMATE_MONITOR_MAX_SECONDS` can set an optional time limit; the default `0` disables it. Submitted prompts and persistent Codex queue entries end monitoring; CLI Tab messages held in the TUI do not.

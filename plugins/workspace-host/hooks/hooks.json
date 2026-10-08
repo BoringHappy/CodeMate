@@ -2,6 +2,6 @@
   "hooks": {
     "SessionStart": [{"hooks": [{"type": "command", "command": "bash \"${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/dispatch.sh\" record_session_status.sh", "timeout": 10}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bash \"${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/dispatch.sh\" record_session_status.sh", "timeout": 10}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "bash \"${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/dispatch.sh\" stop.sh", "timeout": 604800, "statusMessage": "Monitoring pull request feedback"}]}]
+    "Stop": [{"hooks": [{"type": "command", "command": "bash \"${CODEMATE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/hooks/dispatch.sh\" stop.sh", "timeout": 604800, "statusMessage": "Checking pull request feedback"}]}]
   }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -795,6 +796,90 @@ def test_monitor_checks_both_histories_when_runtime_is_unidentified(tmp_path: Pa
     assert stdout == ""
     assert stderr == ""
     assert len(call_log.read_text().splitlines()) == 4
+
+
+@pytest.mark.parametrize("agent", ["codex", "claude"])
+@pytest.mark.parametrize("scenario", ["idle", "feedback", "failure", "busy-branch"])
+def test_host_stop_checks_pr_once_without_waiting(tmp_path: Path, agent: str, scenario: str) -> None:
+    repo = tmp_path / "repo"
+    runtime = tmp_path / "runtime"
+    fake_bin = tmp_path / "bin"
+    codex_home = tmp_path / "codex-home"
+    call_log = tmp_path / "gh-calls.log"
+    repo.mkdir()
+    fake_bin.mkdir()
+    codex_home.mkdir()
+    init_repo(repo)
+    comment = {"id": 1, "user": {"login": "reviewer"}, "body": "Please fix the bug"}
+    write_gh(
+        fake_bin, 46, draft=True,
+        api_issues=f"printf '%s\\n' '{json.dumps(comment)}'\n" if scenario == "feedback" else "",
+    )
+    if scenario == "failure":
+        fake_gh = fake_bin / "gh"
+        fake_gh.write_text(fake_gh.read_text().replace(
+            'if [ "$1 $2" = "pr view" ]; then\n',
+            'if [ "$1 $2" = "pr view" ]; then exit 1;\n',
+        ))
+
+    env = os.environ.copy() | {
+        "CODEMATE_MODE": "host",
+        "CODEMATE_AGENT": agent,
+        "CODEMATE_RUNTIME_DIR": str(runtime),
+        "CODEMATE_WORKSPACE_HOOKS_ROOT": str(HOOKS),
+        # Host checks must ignore backoff even if inherited from container use.
+        "CODEMATE_MONITOR_DELAYS": "10",
+        "CODEMATE_MONITOR_MAX_SECONDS": "0",
+        "CODEX_HOME": str(codex_home),
+        "CODEX_SQLITE_HOME": str(codex_home),
+        "CODEMATE_TEST_GH_LOG": str(call_log),
+        "SLACK_WEBHOOK": "",
+        "LARK_WEBHOOK": "",
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    env.pop("CODEMATE_NO_PR", None)
+    env.pop("CODEMATE_CHAT", None)
+    stop = hook_input("host-check-session", repo, "Stop")
+    run_hook("record_session_status.sh", stop, cwd=repo, env=env)
+    monitor_state = monitor_state_path(runtime, repo)
+    monitor_state.parent.mkdir(parents=True, exist_ok=True)
+    branch_lock = monitor_state.with_name(monitor_state.name.replace("monitor-state.json", "monitor.lock"))
+
+    with branch_lock.open("w") as lock:
+        if scenario == "busy-branch":
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run(
+            ["bash", str(ROOT / "plugins/workspace-host/hooks/dispatch.sh"),
+             "stop.sh" if agent == "codex" else "claude_stop.sh"],
+            cwd=repo, env=env, input=json.dumps(stop), text=True,
+            capture_output=True, check=False, timeout=5,
+        )
+
+    calls = call_log.read_text().splitlines() if call_log.exists() else []
+    if scenario == "busy-branch":
+        assert calls == []
+        assert not monitor_state.exists()
+    else:
+        assert sum(line.startswith("pr view ") for line in calls) == 1
+        assert len(calls) == {"idle": 4, "feedback": 3, "failure": 2}[scenario]
+        state = json.loads(monitor_state.read_text())
+        assert state["last_issue_comment_id"] == (1 if scenario == "feedback" else 0)
+        assert state["consecutive_failures"] == (1 if scenario == "failure" else 0)
+    if scenario == "feedback":
+        if agent == "codex":
+            assert result.returncode == 0
+            output = json.loads(result.stdout)
+            assert output["decision"] == "block"
+            assert comment["body"] in output["reason"]
+            assert result.stderr == ""
+        else:
+            assert result.returncode == 2
+            assert comment["body"] in result.stderr
+            assert result.stdout == ""
+    else:
+        assert result.returncode == 0
+        assert result.stdout == result.stderr == ""
+    assert not list(codex_home.iterdir())
 
 
 def test_monitor_exits_after_max_polls(tmp_path: Path) -> None:
