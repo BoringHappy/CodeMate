@@ -1,6 +1,6 @@
 {
   "name": "workspace-host",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {"name": "CodeMate"},
   "description": "Host workspace lifecycle and PR feedback automation without container setup",
   "hooks": "./hooks/claude-hooks.json"
