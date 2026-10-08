@@ -313,6 +313,11 @@ def base_reference(cwd: Path, requested: str | None) -> tuple[str, str]:
             f"refs/heads/{name}",
         ):
             if has_ref(cwd, ref):
+                if ref.startswith("refs/heads/"):
+                    remotes = git_output(cwd, "remote").splitlines()
+                    for remote in ("upstream", "origin"):
+                        if remote in remotes:
+                            return name, f"refs/remotes/{remote}/{name}"
                 return name, ref
     raise SystemExit(
         "No main/master base branch is available. Fetch or create main/master before using --host."
@@ -417,8 +422,9 @@ def prepare_worktree(plan: WorktreePlan, home: Path, env: dict[str, str]) -> Pat
     # Serialize repository metadata changes, while task sessions on distinct
     # branches retain independent locks and can run concurrently.
     with locked(plan.lock_directory / "repository.lock", wait=True):
-        if not env.get("CODEMATE_NO_PR") and plan.base_ref.startswith("refs/remotes/"):
+        if plan.base_ref.startswith("refs/remotes/"):
             remote = plan.base_ref.split("/")[2]
+            print(f"Updating base: {remote}/{plan.base_branch}")
             subprocess.run(
                 [
                     "git",
@@ -680,6 +686,24 @@ def workflow_prompt(
     return prompt
 
 
+def xcode_project(worktree: Path) -> Path:
+    """Select a single root workspace, falling back to a root project."""
+    if not worktree.is_dir():
+        raise SystemExit(f"Worktree directory does not exist: {worktree}")
+    for extension in ("xcworkspace", "xcodeproj"):
+        projects = sorted(
+            path for path in worktree.glob(f"*.{extension}") if path.is_dir()
+        )
+        if len(projects) > 1:
+            raise SystemExit(
+                "Multiple Xcode projects found; choose one to open manually:\n"
+                + "\n".join(str(path) for path in projects)
+            )
+        if projects:
+            return projects[0]
+    raise SystemExit(f"No Xcode workspace/project found in worktree root: {worktree}")
+
+
 def run_host(args: SimpleNamespace) -> None:
     from .main import codemate_home
 
@@ -693,6 +717,7 @@ def run_host(args: SimpleNamespace) -> None:
         raise SystemExit(f"Invalid host agent: {agent}. Expected: claude or codex")
     dry_run = getattr(args, "dry_run", False)
     show_config = getattr(args, "config", False)
+    xcode = bool(getattr(args, "xcode", False)) and sys.platform == "darwin"
     chat = bool(getattr(args, "chat", False)) or env.get(
         "CODEMATE_CHAT", ""
     ).lower() in {"1", "true", "yes", "on"}
@@ -703,6 +728,8 @@ def run_host(args: SimpleNamespace) -> None:
     )
     if not dry_run and not show_config:
         required = (agent, "git", "bash", "jq") + (() if chat else ("gh",))
+        if xcode:
+            required += ("open",)
         missing = [
             name for name in required if not shutil.which(name, path=env.get("PATH"))
         ]
@@ -770,13 +797,18 @@ def run_host(args: SimpleNamespace) -> None:
                     "runtime": str(runtime),
                     "chat": chat,
                     "no_pr": bool(env["CODEMATE_NO_PR"]),
+                    "xcode": xcode,
                 },
                 indent=2,
             )
         )
         return
     if dry_run:
+        if plan.base_ref.startswith("refs/remotes/"):
+            print(f"Update base: fetch {plan.base_ref} before worktree checkout")
         print(f"Worktree: {plan.path} (create/reuse; base {plan.base_ref})")
+        if xcode:
+            print("Xcode: open -a Xcode <root .xcworkspace or .xcodeproj> after worktree setup")
         print(shlex.join(command))
         return
     with locked(plan.session_lock) as session_fd:
@@ -787,6 +819,7 @@ def run_host(args: SimpleNamespace) -> None:
             raise SystemExit(
                 "PR automation requires a clean target worktree. Commit/stash its existing changes or use --chat."
             )
+        project = xcode_project(cwd) if xcode else None
         prepare_plugins(source, bundle, codex_home, agent, marketplace)
         runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
         if not no_pr:
@@ -798,6 +831,14 @@ def run_host(args: SimpleNamespace) -> None:
                 workflow_prompt(plan, args, pr),
                 getattr(args, "query", None) or "",
                 chat=chat,
+            )
+        if project is not None:
+            print(f"Opening Xcode: {project}")
+            subprocess.run(
+                ["open", "-a", "Xcode", str(project)],
+                cwd=cwd,
+                env=env,
+                check=True,
             )
         # Keep the lock in the agent too. If the launcher is killed, another
         # session cannot enter this branch while its agent is still running.

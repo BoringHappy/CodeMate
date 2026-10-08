@@ -88,6 +88,166 @@ def test_host_requires_an_explicit_target(checkout):
     assert not Path(os.environ["CODEMATE_HOME"]).exists()
 
 
+@pytest.mark.parametrize("explicit_host", [False, True])
+@pytest.mark.parametrize("preview", ["--dry-run", "--config"])
+def test_xcode_implies_host_without_side_effects(
+    checkout, monkeypatch, explicit_host, preview
+):
+    monkeypatch.setattr(host.sys, "platform", "darwin")
+    def unexpected(*a, **kw):
+        pytest.fail("Preview must not initialize Docker, create a worktree, or open Xcode")
+
+    monkeypatch.setattr(main, "ensure_global_config", unexpected)
+    monkeypatch.setattr(main, "resolve_config", unexpected)
+    monkeypatch.setattr(host, "prepare_worktree", unexpected)
+    flags = ["--xcode", "--branch", "feature/ios", preview]
+    if explicit_host:
+        flags.append("--host")
+    result = CliRunner().invoke(main.app, flags)
+    assert result.exit_code == 0, result.output
+    expected = '"xcode": true' if preview == "--config" else "open -a Xcode"
+    assert expected in result.output
+    assert not Path(os.environ["CODEMATE_HOME"]).exists()
+
+
+def test_xcode_is_ignored_by_container_dispatch_on_non_macos(checkout, monkeypatch):
+    monkeypatch.setattr(host.sys, "platform", "linux")
+    runner = CliRunner()
+    normal = runner.invoke(main.app, ["--pure", "--dry-run"])
+    result = runner.invoke(main.app, ["--pure", "--dry-run", "--xcode"])
+    assert normal.exit_code == result.exit_code == 0, result.output
+    assert result.output == normal.output
+    assert not Path(os.environ["CODEMATE_HOME"]).exists()
+
+
+def test_xcode_is_ignored_by_host_launch_on_non_macos(checkout, monkeypatch):
+    monkeypatch.setattr(host.sys, "platform", "linux")
+    real_run = subprocess.run
+    real_which = shutil.which
+    launched = []
+
+    def which(name, **kwargs):
+        assert name != "open", "Xcode opener must not be required on Linux"
+        return real_which(name, **kwargs)
+
+    def run(command, **kwargs):
+        assert command[0] != "open", "Xcode must not open on Linux"
+        if command[0] == "codex":
+            launched.append(kwargs["cwd"])
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host.subprocess, "run", run)
+    monkeypatch.setattr(host.shutil, "which", which)
+    result = CliRunner().invoke(
+        main.app, ["--host", "--xcode", "--branch", "feature/host", "--chat"]
+    )
+    assert result.exit_code == 0, result.output
+    assert len(launched) == 1
+    assert launched[0] != checkout
+
+
+def test_xcode_is_inactive_in_host_config_on_non_macos(checkout, monkeypatch):
+    monkeypatch.setattr(host.sys, "platform", "linux")
+    result = CliRunner().invoke(
+        main.app, ["--host", "--xcode", "--branch", "feature/host", "--config"]
+    )
+    assert result.exit_code == 0, result.output
+    assert '"xcode": false' in result.output
+
+
+@pytest.mark.parametrize("extension", ["xcworkspace", "xcodeproj"])
+def test_xcode_selects_root_bundle_with_workspace_priority(tmp_path, extension):
+    project = tmp_path / f"App with spaces.{extension}"
+    project.mkdir()
+    if extension == "xcworkspace":
+        (tmp_path / "App.xcodeproj").mkdir()
+        (tmp_path / "Other.xcodeproj").mkdir()
+    assert host.xcode_project(tmp_path) == project
+
+
+@pytest.mark.parametrize("extension", ["xcworkspace", "xcodeproj"])
+def test_xcode_rejects_ambiguous_bundles(tmp_path, extension):
+    projects = [tmp_path / f"{name}.{extension}" for name in ("A", "B")]
+    for project in projects:
+        project.mkdir()
+    if extension == "xcworkspace":
+        (tmp_path / "Unique.xcodeproj").mkdir()
+    with pytest.raises(SystemExit, match="Multiple Xcode") as error:
+        host.xcode_project(tmp_path)
+    assert all(str(project) in str(error.value) for project in projects)
+
+
+def test_xcode_requires_existing_worktree_and_root_bundle(tmp_path):
+    with pytest.raises(SystemExit, match="directory does not exist"):
+        host.xcode_project(tmp_path / "missing")
+    (tmp_path / "Not a bundle.xcworkspace").touch()
+    (tmp_path / "nested" / "App.xcodeproj").mkdir(parents=True)
+    with pytest.raises(SystemExit, match="No Xcode workspace/project"):
+        host.xcode_project(tmp_path)
+
+
+@pytest.mark.parametrize("failure", [None, "pr", "open", "missing"])
+def test_xcode_opens_prepared_worktree_before_agent(checkout, monkeypatch, failure):
+    if failure != "missing":
+        project = checkout / "App with spaces.xcworkspace"
+        project.mkdir()
+        (project / "contents.xcworkspacedata").write_text("<Workspace/>")
+        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "commit", "-qm", "Add workspace"], check=True)
+    monkeypatch.setattr(host.sys, "platform", "darwin")
+    real_which = shutil.which
+    monkeypatch.setattr(
+        host.shutil,
+        "which",
+        lambda name, **kw: "/usr/bin/open" if name == "open" else real_which(name, **kw),
+    )
+    real_run = subprocess.run
+    events = []
+    opened = []
+
+    def prepare_pr(plan, cwd, args, env):
+        assert cwd != checkout
+        events.append("pr")
+        if failure == "pr":
+            raise SystemExit("PR setup failed")
+        return {"number": 123, "url": "https://github.com/test/repo/pull/123"}
+
+    def run(command, **kwargs):
+        if command[0] == "open":
+            events.append("open")
+            assert command[:3] == ["open", "-a", "Xcode"]
+            assert Path(command[3]) == kwargs["cwd"] / "App with spaces.xcworkspace"
+            assert kwargs["cwd"] != checkout
+            assert (
+                host.git_output(kwargs["cwd"], "branch", "--show-current")
+                == "feature/host"
+            )
+            opened.append(command[3])
+            if failure == "open":
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0)
+        if command[0] == "codex":
+            events.append("agent")
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(host, "prepare_pr", prepare_pr)
+    monkeypatch.setattr(host.subprocess, "run", run)
+    if failure:
+        error = subprocess.CalledProcessError if failure == "open" else SystemExit
+        with pytest.raises(error):
+            host.run_host(args(xcode=True))
+        expected = {"pr": ["pr"], "open": ["pr", "open"], "missing": []}
+        assert events == expected[failure]
+    else:
+        host.run_host(args(xcode=True))
+        host.run_host(args(xcode=True))
+        assert events == ["pr", "open", "agent"] * 2
+        assert opened[0] == opened[1]
+    assert host.git_output(checkout, "branch", "--show-current") == "main"
+
+
 def test_codex_is_default_for_host_and_container(checkout):
     host.run_host(args(agent=None, dry_run=True))
     assert (
@@ -107,6 +267,79 @@ def test_base_branch_detection_and_linked_worktree(checkout, branch):
     assert host.git_output(worktree, "branch", "--show-current") == "feature/host"
     assert host.git_output(checkout, "branch", "--show-current") == branch
     assert host.prepare_worktree(plan, home, dict(os.environ)) == worktree
+
+
+@pytest.mark.parametrize("branch", ["main", "master"])
+@pytest.mark.parametrize("remote_name", ["origin", "upstream"])
+@pytest.mark.parametrize("no_pr", [False, True])
+@pytest.mark.parametrize("cached_base", [False, True])
+def test_fetches_latest_base_before_checkout(
+    checkout, tmp_path, branch, remote_name, no_pr, cached_base
+):
+    subprocess.run(["git", "branch", "-m", branch], check=True)
+    initial = host.git_output(checkout, "rev-parse", "HEAD")
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    subprocess.run(["git", "remote", "add", remote_name, str(remote)], check=True)
+    subprocess.run(["git", "push", "-q", remote_name, branch], check=True)
+    if not cached_base:
+        subprocess.run(
+            ["git", "update-ref", "-d", f"refs/remotes/{remote_name}/{branch}"],
+            check=True,
+        )
+    producer = tmp_path / "producer"
+    subprocess.run(["git", "clone", "-qb", branch, str(remote), str(producer)], check=True)
+    (producer / "latest.txt").write_text("latest remote base")
+    subprocess.run(["git", "add", "."], cwd=producer, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "-qm", "Update base",
+        ],
+        cwd=producer,
+        check=True,
+    )
+    subprocess.run(["git", "push", "-q", "origin", branch], cwd=producer, check=True)
+    latest = host.git_output(producer, "rev-parse", "HEAD")
+    (checkout / "unfinished.txt").write_text("preserve local changes")
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    env = dict(os.environ, CODEMATE_NO_PR="true" if no_pr else "")
+    plan = host.plan_worktree(args(), checkout, home, env)
+    assert plan.base_ref == f"refs/remotes/{remote_name}/{branch}"
+    worktree = host.prepare_worktree(plan, home, env)
+    assert host.git_output(worktree, "rev-parse", "HEAD") == latest
+    assert (worktree / "latest.txt").read_text() == "latest remote base"
+    assert host.git_output(checkout, "rev-parse", "HEAD") == initial
+    assert (checkout / "unfinished.txt").read_text() == "preserve local changes"
+    # Reuse still refreshes the base without moving an existing task branch.
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+            "commit", "--allow-empty", "-qm", "Update again",
+        ],
+        cwd=producer,
+        check=True,
+    )
+    subprocess.run(["git", "push", "-q", "origin", branch], cwd=producer, check=True)
+    assert host.prepare_worktree(plan, home, env) == worktree
+    assert host.git_output(checkout, "rev-parse", plan.base_ref) == host.git_output(
+        producer, "rev-parse", "HEAD"
+    )
+    assert host.git_output(worktree, "rev-parse", "HEAD") == latest
+
+
+def test_failed_base_fetch_prevents_worktree_creation(checkout, tmp_path):
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(tmp_path / "missing.git")],
+        check=True,
+    )
+    home = Path(os.environ["CODEMATE_HOME"]) / "host"
+    env = dict(os.environ, CODEMATE_NO_PR="true")
+    plan = host.plan_worktree(args(), checkout, home, env)
+    with pytest.raises(subprocess.CalledProcessError):
+        host.prepare_worktree(plan, home, env)
+    assert not plan.path.exists()
+    assert not host.has_ref(checkout, "refs/heads/feature/host")
 
 
 def test_unsupported_or_missing_base_is_rejected(checkout):
@@ -463,6 +696,7 @@ def test_fork_pr_target_uses_upstream_and_fork_owner(checkout):
     )
 
 
+@pytest.mark.parametrize("mode", ["--host", "--xcode"])
 @pytest.mark.parametrize(
     "flag",
     [
@@ -474,8 +708,9 @@ def test_fork_pr_target_uses_upstream_and_fork_owner(checkout):
         "--repo=https://github.com/example/repo",
     ],
 )
-def test_rejects_container_options_before_writing(checkout, flag):
-    result = CliRunner().invoke(main.app, ["--host", flag, "--dry-run"])
+def test_rejects_container_options_before_writing(checkout, monkeypatch, flag, mode):
+    monkeypatch.setattr(host.sys, "platform", "darwin")
+    result = CliRunner().invoke(main.app, [mode, flag, "--dry-run"])
     assert result.exit_code == 1
     assert "remove" in result.output
     assert not Path(os.environ["CODEMATE_HOME"]).exists()

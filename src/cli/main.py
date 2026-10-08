@@ -805,7 +805,9 @@ def print_config(config: Mapping[str, ResolvedValue]) -> None:
 
 
 def run_codemate(args: SimpleNamespace) -> None:
-    if getattr(args, "host", False):
+    if getattr(args, "host", False) or (
+        getattr(args, "xcode", False) and sys.platform == "darwin"
+    ):
         from .host import run_host
 
         run_host(args)
@@ -886,6 +888,7 @@ def cli(
     query: Optional[str] = typer.Option(None, "--query", help="Initial query to send to the selected agent."),
     agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent. Default: codex."),
     host: bool = typer.Option(False, "--host", help="Launch the local agent in a Git worktree based on main/master, without Docker or setup."),
+    xcode: bool = typer.Option(False, "--xcode", help="On macOS, open the worktree's root Xcode workspace/project before launching the local agent (implies --host; ignored on other platforms)."),
     co_author_by: Optional[str] = typer.Option(None, "--co-author-by", help="Commit co-author, e.g. 'Name <email@example.com>'."),
     no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push; host mode commits locally."),
     chat: bool = typer.Option(False, "--chat", help="Run in chat mode: skip PR creation and CodeMate system prompt injection."),
@@ -950,6 +953,7 @@ def cli(
         query=query,
         agent=agent.value if agent else None,
         host=host,
+        xcode=xcode,
         co_author_by=co_author_by,
         no_pr=no_pr,
         chat=chat,
