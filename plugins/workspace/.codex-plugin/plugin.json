@@ -1,6 +1,6 @@
 {
   "name": "workspace",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "CodeMate workspace utilities for project service startup, repository setup, and best-practice configuration",
   "author": {
     "name": "CodeMate"

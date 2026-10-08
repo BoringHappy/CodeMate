@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-基于 Docker 的 Claude Code 和 Codex 环境，具有自动化 Git/PR 设置功能。
+在 Docker 或宿主机上运行 Claude Code 和 Codex，提供 Git/PR 工作流自动化。
 
 > **⚠️ 安全提示：** 此容器运行所选 agent 时不会请求操作确认。仅在隔离环境中使用受信任的代码仓库。
 
@@ -78,6 +78,50 @@ codemate --setup
 `codemate` 命令由 `src/` 中的 Python CLI 包提供。
 
 ### 使用方法
+
+#### Host 模式（macOS / Linux）
+
+在当前 Git checkout 中启动宿主机已安装的 agent，无需 Docker，也不需要
+运行 `codemate --setup`：
+
+```bash
+codemate --host --agent codex
+codemate --host --agent claude --query "实现本次需求"
+codemate --host --agent codex --pr 123
+codemate --host --agent codex --issue 456
+codemate --host --agent codex --chat
+codemate --host --agent codex --dry-run
+```
+
+先在宿主机安装并登录所选 agent。Host 模式需要 Git、bash、jq；PR 自动化
+还需要已经认证的 GitHub CLI。沿用宿主机 agent 的登录、模型、MCP 和权限
+配置，不添加容器中的权限绕过参数。Codex 提示信任插件 hooks 时，需要
+检查并信任后才能使用 PR 监控。
+
+默认读取已有 PR、对完成的任务自动 commit/push，并监控 PR 反馈和 CI。
+没有 PR 时可以继续工作，按用户要求创建 PR。`--no-pr` 只做本地提交，
+不 push、不创建 PR。`--chat` 不注入工作流指令，也不运行 Stop 自动化。
+Host 模式不执行项目 setup 命令或启动服务。
+
+使用当前已检出的具名分支；`--branch`、`--pr` 用于验证当前 checkout，
+不会切换分支。启用 PR 自动化时，启动前 worktree 必须干净。同一 worktree
+只能运行一个 CodeMate host 实例；并行任务请使用不同 Git worktree。
+此锁不会阻止其他编辑器或普通 agent 会话修改文件。
+
+插件随 CLI 安装包分发，按内容版本存放在
+`${CODEMATE_HOME:-~/.codemate}/host/plugins/`。运行状态默认在
+`host/runtime/`，可用 `CODEMATE_RUNTIME_DIR` 覆盖；每次启动都有独立实例 ID，
+PR 监控状态按 worktree 和分支共享。Codex 通过本次启动参数启用私有
+marketplace 插件，Claude 通过仅本次会话生效的 `--plugin-dir` 加载。
+不会在全局 agent 配置中注册或启用这些插件，所以普通启动不会加载这套
+host 插件。以前手动全局启用的 CodeMate 插件仍保留原设置；如希望普通启动
+也不加载它们，需要另行禁用。Host 会话会临时禁用旧的 `@codemate` 插件，
+避免重复执行 hooks。
+
+不自动读取容器的 `.env` 或 setup 配置。继承宿主机环境，也可以通过
+`--env KEY=VALUE`、`--env-file path` 显式传入变量。`--mount`、`--repo`、
+`--build`、`--shell`、`--pure` 等容器选项不能和 `--host` 合用。
+`--dry-run`、`--config` 不安装插件或写入运行状态。
 
 #### 基本命令
 

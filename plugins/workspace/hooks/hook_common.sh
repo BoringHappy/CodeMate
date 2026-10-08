@@ -7,6 +7,22 @@
 # PR-status file. This keeps concurrent repositories, worktrees, and agent
 # sessions from reading or overwriting one another's coordination files.
 
+codemate_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum
+    else
+        shasum -a 256
+    fi
+}
+
+codemate_flock() {
+    if command -v flock >/dev/null 2>&1; then
+        flock "$@"
+    else
+        "${CODEMATE_PYTHON:-python3}" "$(dirname "${BASH_SOURCE[0]}")/file_lock.py" "$@"
+    fi
+}
+
 codemate_runtime_root() {
     local root
 
@@ -52,7 +68,7 @@ codemate_safe_component() {
     if [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]; then
         printf '%s\n' "$value"
     else
-        printf '%s' "$value" | sha256sum | awk '{print $1}'
+        printf '%s' "$value" | codemate_sha256 | awk '{print $1}'
     fi
 }
 
@@ -72,7 +88,7 @@ codemate_event_fingerprint() {
         stop_hook_active: (.stop_hook_active // null),
         last_assistant_message: (.last_assistant_message // null),
         prompt: (.prompt // null)
-    }' 2>/dev/null | sha256sum | awk '{print $1}'
+    }' 2>/dev/null | codemate_sha256 | awk '{print $1}'
 }
 
 codemate_session_dir() {
@@ -104,7 +120,7 @@ codemate_workspace_dir() {
         branch=$(git -C "$cwd" rev-parse --short=12 HEAD 2>/dev/null) || return 1
         branch="detached-$branch"
     fi
-    workspace_key=$(printf '%s\n%s' "$git_dir" "$branch" | sha256sum | awk '{print $1}')
+    workspace_key=$(printf '%s\n%s' "$git_dir" "$branch" | codemate_sha256 | awk '{print $1}')
     workspace_dir="$session_dir/workspaces/$workspace_key"
 
     umask 077
@@ -199,7 +215,7 @@ codemate_has_queued_prompt() {
     # Only test for an item in this thread; never read prompt contents or
     # modify Codex's queue. Missing/older schemas and busy databases fall back
     # to the existing session-status and prompt-history checks.
-    python3 - "$queue_file" "$session_id" 2>/dev/null <<'PY'
+    "${CODEMATE_PYTHON:-python3}" - "$queue_file" "$session_id" 2>/dev/null <<'PY'
 import sqlite3
 import sys
 from contextlib import closing
@@ -312,7 +328,7 @@ codemate_worktree_key() {
 
     git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 1
     branch=$(codemate_current_branch) || return 1
-    printf '%s\n%s' "$git_dir" "$branch" | sha256sum | awk '{print $1}'
+    printf '%s\n%s' "$git_dir" "$branch" | codemate_sha256 | awk '{print $1}'
 }
 
 # Workspace-private monitor cursor/lock base, keyed by Git worktree + branch.

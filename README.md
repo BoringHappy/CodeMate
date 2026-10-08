@@ -2,7 +2,7 @@
 
 English | [简体中文](README_CN.md)
 
-Docker-based Claude Code and Codex environment with automated Git/PR setup.
+Claude Code and Codex workflows in Docker or directly on your host, with Git/PR automation.
 
 > **⚠️ Security Notice:** This container runs the selected agent without approval prompts. Use only in isolated environments with trusted repositories.
 
@@ -80,6 +80,56 @@ codemate --setup
 The `codemate` command is provided by the Python CLI package in `src/`.
 
 ### Usage
+
+#### Host mode (macOS / Linux)
+
+Run the installed host agent in your current Git checkout, without Docker or
+`codemate --setup`:
+
+```bash
+codemate --host --agent codex
+codemate --host --agent claude --query "Implement the requested change"
+codemate --host --agent codex --pr 123
+codemate --host --agent codex --issue 456
+codemate --host --agent codex --chat
+codemate --host --agent codex --dry-run
+```
+
+Install and sign in to the selected agent locally first. Host mode requires
+Git, bash, jq, and (for PR automation) an authenticated GitHub CLI. It retains
+native agent credentials, model/MCP configuration, and permission settings;
+it does not enable the container's permission bypass flags. Review and trust
+the host plugin hooks when Codex asks before relying on PR monitoring.
+
+The default workflow reads an existing PR, commits/pushes completed task
+changes, and monitors PR feedback and CI. Without an existing PR, work can
+continue; PR creation happens when requested. `--no-pr` commits locally without
+pushing or creating a PR. `--chat` skips workflow prompt injection and Stop
+automation. No project setup commands or services are run.
+
+Host mode uses the current named branch; `--branch` and `--pr` validate that
+checkout instead of switching it. PR automation requires a clean worktree at
+launch. A lock prevents simultaneous CodeMate host sessions in the same
+worktree; use separate Git worktrees for parallel tasks. Locks do not prevent
+other editors or plain agent sessions from changing your files.
+
+Plugin resources ship in the CLI package. CodeMate publishes immutable bundles
+under `${CODEMATE_HOME:-~/.codemate}/host/plugins/` and shares worktree-scoped
+runtime state under `host/runtime/` (or `CODEMATE_RUNTIME_DIR`). Each launch has
+a unique instance ID. Codex receives a private marketplace and plugin enablement
+through process arguments; Claude receives session-only `--plugin-dir` paths.
+CodeMate does not register or enable these plugins in global agent config, so
+ordinary `codex`/`claude` launches do not load this host bundle. Previously
+installed, globally enabled CodeMate plugins remain an explicit user setting:
+disable those separately if you want ordinary launches to omit them. Host
+launches disable the legacy `@codemate` plugins for their own session to avoid
+duplicate hooks.
+
+Container `.env` and setup configuration are not automatically imported.
+The host process inherits your environment; use `--env KEY=VALUE` or
+`--env-file path` for explicit additions. Container flags such as `--mount`,
+`--repo`, `--build`, `--shell`, and `--pure` cannot be combined with `--host`.
+`--dry-run` and `--config` do not install plugins or write launch state.
 
 #### Basic Commands
 

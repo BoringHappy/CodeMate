@@ -10,7 +10,7 @@ SESSION_DIR=$(codemate_session_dir "$HOOK_INPUT") || exit 0
 EVENT_FINGERPRINT=$(codemate_event_fingerprint "$HOOK_INPUT") || exit 0
 
 exec 9>"$SESSION_DIR/stop.lock"
-flock -w 5 9 || exit 0
+codemate_flock -w 5 9 || exit 0
 
 # The synchronous Stop status handler runs alongside this async handler. Wait
 # briefly for it instead of writing Stop here; otherwise a delayed background

@@ -13,7 +13,7 @@ EVENT_FINGERPRINT=$(codemate_event_fingerprint "$HOOK_INPUT") || exit 0
 # handlers concurrently, so separate handlers could otherwise race while
 # updating status, notification baselines, or monitor cursors.
 exec 9>"$SESSION_DIR/stop.lock"
-flock -w 5 9 || exit 0
+codemate_flock -w 5 9 || exit 0
 
 codemate_record_session_status "$HOOK_INPUT" || exit 0
 codemate_session_is_stopped "$SESSION_DIR" "$EVENT_FINGERPRINT" || exit 0

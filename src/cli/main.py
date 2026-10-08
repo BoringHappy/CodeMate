@@ -805,6 +805,11 @@ def print_config(config: Mapping[str, ResolvedValue]) -> None:
 
 
 def run_codemate(args: SimpleNamespace) -> None:
+    if getattr(args, "host", False):
+        from .host import run_host
+
+        run_host(args)
+        return
     cwd = Path.cwd()
     if args.setup:
         create_setup_files(cwd)
@@ -877,8 +882,9 @@ def cli(
     issue: Optional[str] = typer.Option(None, "--issue", help="GitHub issue number to work on."),
     query: Optional[str] = typer.Option(None, "--query", help="Initial query to send to the selected agent."),
     agent: Optional[Agent] = typer.Option(None, "--agent", help="Runtime agent."),
+    host: bool = typer.Option(False, "--host", help="Launch the locally installed agent in the current worktree without Docker or setup."),
     co_author_by: Optional[str] = typer.Option(None, "--co-author-by", help="Commit co-author, e.g. 'Name <email@example.com>'."),
-    no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push."),
+    no_pr: bool = typer.Option(False, "--no-pr", help="Skip PR creation and branch push; host mode commits locally."),
     chat: bool = typer.Option(False, "--chat", help="Run in chat mode: skip PR creation and CodeMate system prompt injection."),
     shell: bool = typer.Option(False, "--shell", help="Open an interactive zsh shell in the container instead of launching the agent."),
     pure: bool = typer.Option(
@@ -925,10 +931,10 @@ def cli(
         "--tag",
         help=f"Image tag for local build. Default: {DEFAULT_TAG} ({DEFAULT_PURE_TAG} with --pure).",
     ),
-    env_values: List[str] = typer.Option([], "--env", help="Extra container env KEY=VALUE."),
+    env_values: List[str] = typer.Option([], "--env", help="Extra agent/container env KEY=VALUE."),
     env_files: List[str] = typer.Option([], "--env-file", help="Additional env file to merge."),
     show_config: bool = typer.Option(False, "--config", help="Print resolved config with sources."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print Docker command without running it."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the launch command without running it."),
 ) -> None:
     args = SimpleNamespace(
         setup=setup,
@@ -939,6 +945,7 @@ def cli(
         issue=issue,
         query=query,
         agent=agent.value if agent else None,
+        host=host,
         co_author_by=co_author_by,
         no_pr=no_pr,
         chat=chat,
