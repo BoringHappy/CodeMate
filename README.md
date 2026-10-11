@@ -96,7 +96,20 @@ codemate --host --branch feature/chat --chat
 codemate --host --branch feature/my-task --base-branch master --dry-run
 codemate --xcode --branch feature/ios-task
 codemate --xcode --pr 123
+codemate worktree clean
 ```
+
+`codemate worktree clean` runs directly on the host and opens an interactive
+worktree selector. It lists the current repository's worktrees plus CodeMate
+host worktrees under `${CODEMATE_HOME:-~/.codemate}/host/worktrees/`, so it also
+works outside a checkout. Use **↑/↓** (or **j/k**) to select a row,
+**Backspace** to request deletion, and **Enter** to confirm. **Esc** cancels
+the confirmation; **R** refreshes the list; **Q** exits. Keyboard hints stay
+at the bottom. The list shows each worktree's branch, path, and cleanup status.
+Removal uses `git worktree remove` and retains branches. Primary checkouts,
+the worktree containing the current directory, Git-locked worktrees, active
+CodeMate sessions, and worktrees with uncommitted/untracked changes cannot be
+removed. No Docker, agent, or GitHub authentication is needed.
 
 On macOS, `--xcode` implies `--host` and opens the prepared worktree's Xcode
 project before launching the agent. It also works with an explicit `--host`,

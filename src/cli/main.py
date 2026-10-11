@@ -37,7 +37,21 @@ DEFAULT_MARKETPLACES = "BoringHappy/CodeMate"
 DEFAULT_PLUGINS = "git@codemate,pr@codemate,dev@codemate,issue@codemate,workspace@codemate"
 
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
+worktree_app = typer.Typer(help="Manage host Git worktrees.", no_args_is_help=True)
+app.add_typer(worktree_app, name="worktree")
 console = Console()
+
+
+@worktree_app.command("clean")
+def clean_worktrees() -> None:
+    """Interactively select a host worktree and confirm its removal."""
+    from .worktree import WorktreeError, run_clean
+
+    try:
+        run_clean(codemate_home().resolve() / "host", Path.cwd().resolve())
+    except WorktreeError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
 
 
 class Agent(str, Enum):
@@ -878,6 +892,7 @@ def run_codemate(args: SimpleNamespace) -> None:
 
 @app.callback(invoke_without_command=True)
 def cli(
+    ctx: typer.Context,
     setup: bool = typer.Option(False, "--setup", help="Create configuration files."),
     update: bool = typer.Option(False, "--update", help="Show update instructions."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Branch name to work on."),
@@ -942,6 +957,20 @@ def cli(
     show_config: bool = typer.Option(False, "--config", help="Print resolved config with sources."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the launch command without running it."),
 ) -> None:
+    if ctx.invoked_subcommand is not None:
+        launch_options = [
+            param.opts[0]
+            for param in ctx.command.params
+            if param.name != "host"
+            and getattr(ctx.get_parameter_source(param.name), "name", None) == "COMMANDLINE"
+        ]
+        if launch_options:
+            raise typer.BadParameter(
+                "Launch options cannot be used with worktree subcommands: "
+                + ", ".join(launch_options)
+                + ". Run: codemate worktree clean"
+            )
+        return
     args = SimpleNamespace(
         setup=setup,
         update=update,

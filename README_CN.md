@@ -94,7 +94,18 @@ codemate --host --branch feature/chat --chat
 codemate --host --branch feature/my-task --base-branch master --dry-run
 codemate --xcode --branch feature/ios-task
 codemate --xcode --pr 123
+codemate worktree clean
 ```
+
+`codemate worktree clean` 直接在 host 运行，打开交互式 worktree 选择器。
+列表包含当前仓库的 worktree，以及
+`${CODEMATE_HOME:-~/.codemate}/host/worktrees/` 下的 CodeMate host worktree，
+也可以在仓库目录之外运行。使用 **↑/↓**（或 **j/k**）选择一行，
+按 **Backspace** 发起删除，再按 **Enter** 确认；**Esc** 取消确认，
+**R** 刷新列表，**Q** 退出。底部持续显示键盘指引，列表显示分支、路径和清理状态。
+删除使用 `git worktree remove`，保留分支。主 checkout、当前目录所在的 worktree、
+被 Git 锁定的 worktree、正在运行 CodeMate 会话的 worktree，以及包含未提交或
+未跟踪文件的 worktree 不允许删除。无需 Docker、agent 或 GitHub 登录。
 
 在 macOS 上，`--xcode` 自动启用 `--host`，在 worktree 准备完成后、启动 agent
 前打开其中的 Xcode 工程。也可以显式搭配 `--host`，支持 `--issue`、`--no-pr`
